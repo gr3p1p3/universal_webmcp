@@ -104,7 +104,7 @@ For a version-pinned URL backed by the npm release, use jsDelivr:
 
 ```html
 <script
-  src="https://cdn.jsdelivr.net/npm/@gr3p/universal-webmcp@0.1.2/dist/browser.iife.js"
+  src="https://cdn.jsdelivr.net/npm/@gr3p/universal-webmcp@0.1.3/dist/browser.iife.js"
   data-webmcp-auto
 ></script>
 ```

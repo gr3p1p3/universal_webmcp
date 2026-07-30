@@ -140,7 +140,7 @@ version-pinned npm-backed URL:
 
 ```js
 await page.addScriptTag({
-  url: 'https://cdn.jsdelivr.net/npm/@gr3p/universal-webmcp@0.1.2/dist/browser.iife.js',
+  url: 'https://cdn.jsdelivr.net/npm/@gr3p/universal-webmcp@0.1.3/dist/browser.iife.js',
 });
 ```
 
