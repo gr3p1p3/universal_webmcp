@@ -1,0 +1,79 @@
+{
+  "name": "@gr3p/universal-webmcp",
+  "version": "0.1.2",
+  "description": "A local, progressive-enhancement runtime for exposing existing web UIs to WebMCP-capable agents.",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gr3p1p3/universal_webmcp.git"
+  },
+  "homepage": "https://github.com/gr3p1p3/universal_webmcp#readme",
+  "bugs": {
+    "url": "https://github.com/gr3p1p3/universal_webmcp/issues"
+  },
+  "keywords": [
+    "webmcp",
+    "browser-agents",
+    "browser-automation",
+    "ai-agents",
+    "progressive-enhancement"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist/*.js",
+    "dist/*.d.ts"
+  ],
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "unpkg": "./dist/browser.iife.js",
+  "jsdelivr": "./dist/browser.iife.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./browser": {
+      "types": "./dist/browser.d.ts",
+      "import": "./dist/browser.js"
+    },
+    "./browser.iife.js": "./dist/browser.iife.js"
+  },
+  "sideEffects": [
+    "./dist/browser.js",
+    "./dist/browser.iife.js"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "vite playground",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "npm run build && playwright test",
+    "test:e2e:live": "npm run build && playwright test --config=playwright.live.config.ts",
+    "test:e2e:install": "playwright install --with-deps",
+    "audit:public": "node scripts/audit-publication.mjs && npm pack --dry-run",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run check",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm run lint && npm test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.31.0",
+    "@playwright/test": "^1.62.0",
+    "@types/node": "^26.1.2",
+    "eslint": "^9.31.0",
+    "jsdom": "^26.1.0",
+    "tsup": "^8.5.0",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.37.0",
+    "vite": "^7.0.6",
+    "vitest": "^3.2.4"
+  }
+}

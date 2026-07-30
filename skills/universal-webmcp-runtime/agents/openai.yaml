@@ -1,0 +1,7 @@
+interface:
+  display_name: "Universal WebMCP Browser Agent"
+  short_description: "Browse through compact WebMCP tools"
+  default_prompt: "Use $universal-webmcp-runtime to browse this interactive page through a compact tool catalog and avoid broad DOM dumps."
+
+policy:
+  allow_implicit_invocation: true

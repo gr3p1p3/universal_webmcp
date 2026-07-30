@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="A local, community-oriented manual QA lab for Universal WebMCP Runtime." />
+    <title>Universal WebMCP Runtime · Community QA Lab</title>
+    <style>
+      :root { color-scheme: light; --ink: #17202b; --muted: #627083; --line: #d8e0e8; --paper: #f6f8fb; --card: #fff; --blue: #2356d8; --blue-soft: #eaf0ff; --green: #17804c; --green-soft: #e7f7ed; --orange: #a85a08; --orange-soft: #fff3df; --red: #b42318; --red-soft: #ffebe8; --shadow: 0 12px 32px rgba(24, 45, 75, .08); }
+      * { box-sizing: border-box; }
+      body { margin: 0; font: 14px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; color: var(--ink); background: var(--paper); }
+      button, input, select { font: inherit; }
+      button { cursor: pointer; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink); padding: .55rem .75rem; }
+      button:hover { border-color: var(--blue); }
+      .primary { background: var(--blue); color: #fff; border-color: var(--blue); }
+      .danger { color: var(--red); }
+      .shell { width: min(1500px, calc(100% - 32px)); margin: 0 auto; }
+      header { padding: 32px 0 24px; display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; }
+      header h1 { margin: 0 0 8px; font-size: clamp(1.8rem, 4vw, 3rem); letter-spacing: -.04em; }
+      header p { color: var(--muted); max-width: 760px; margin: 0; font-size: 1rem; }
+      .badge { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--line); border-radius: 999px; padding: .4rem .65rem; white-space: nowrap; background: var(--card); color: var(--muted); }
+      .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--orange); }
+      .dot.live { background: var(--green); }
+      .layout { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(340px, .8fr); gap: 18px; padding-bottom: 36px; }
+      .stack { display: grid; gap: 18px; align-content: start; }
+      .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); padding: 18px; }
+      .card h2, .card h3 { margin: 0 0 12px; letter-spacing: -.02em; }
+      .card h2 { font-size: 1.15rem; }
+      .card h3 { font-size: .95rem; }
+      .eyebrow { text-transform: uppercase; color: var(--blue); font-size: .7rem; letter-spacing: .12em; font-weight: 800; margin: 0 0 6px; }
+      .toolbar, .form-row, .inline { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; }
+      .toolbar { justify-content: space-between; margin-bottom: 13px; }
+      input, select { border: 1px solid var(--line); border-radius: 8px; padding: .58rem .7rem; background: #fff; color: var(--ink); min-width: 0; }
+      label { display: grid; gap: 4px; color: var(--muted); font-size: .8rem; font-weight: 650; }
+      .search-form { background: var(--blue-soft); border: 1px solid #cbd8ff; padding: 14px; border-radius: 11px; }
+      .search-form input { flex: 1 1 220px; }
+      .scenario { display: grid; gap: 15px; }
+      .scenario-top { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+      .product-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+      .product { border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: grid; gap: 8px; }
+      .product h3 { margin: 0; font-size: .98rem; }
+      .price { font-weight: 800; }
+      .muted { color: var(--muted); }
+      .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 12px; }
+      .tab { border: 0; border-radius: 7px 7px 0 0; background: transparent; color: var(--muted); }
+      .tab[aria-selected="true"] { color: var(--blue); background: var(--blue-soft); }
+      .tab-panel { min-height: 52px; }
+      dialog { border: 1px solid var(--line); border-radius: 14px; max-width: min(430px, calc(100% - 32px)); box-shadow: var(--shadow); padding: 20px; color: var(--ink); }
+      dialog::backdrop { background: rgba(23, 32, 43, .35); }
+      .status-line { display: flex; justify-content: space-between; gap: 12px; color: var(--muted); margin-top: 10px; }
+      .inventory-wrap { overflow-x: auto; }
+      table { border-collapse: collapse; width: 100%; font-size: .78rem; }
+      th, td { text-align: left; padding: 9px 7px; border-bottom: 1px solid var(--line); vertical-align: top; }
+      th { color: var(--muted); font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; white-space: nowrap; }
+      td code { color: #4a5565; overflow-wrap: anywhere; }
+      .pill { display: inline-block; border-radius: 999px; padding: 2px 7px; font-size: .7rem; white-space: nowrap; background: var(--green-soft); color: var(--green); }
+      .pill.warn { background: var(--orange-soft); color: var(--orange); }
+      .pill.fail { background: var(--red-soft); color: var(--red); }
+      .diagnostics, .console { background: #111a24; color: #dbe7f5; border-radius: 10px; padding: 12px; min-height: 92px; max-height: 240px; overflow: auto; font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
+      .test-summary { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+      .counter { padding: .35rem .6rem; border-radius: 7px; background: var(--paper); border: 1px solid var(--line); }
+      .test-list { display: grid; gap: 7px; }
+      .test-row { display: flex; gap: 9px; align-items: baseline; border-bottom: 1px solid var(--line); padding: 7px 0; }
+      .test-row .icon { width: 18px; font-weight: 800; }
+      .test-row.pass .icon { color: var(--green); }
+      .test-row.fail .icon { color: var(--red); }
+      .manual-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+      .manual-grid label:last-child { grid-column: 1 / -1; }
+      @media (max-width: 980px) { .layout { grid-template-columns: 1fr; } header { display: block; } header .badge { margin-top: 14px; } }
+      @media (max-width: 620px) { .shell { width: min(100% - 20px, 1500px); } .product-grid { grid-template-columns: 1fr; } .manual-grid { grid-template-columns: 1fr; } .manual-grid label:last-child { grid-column: auto; } }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <header>
+        <div><p class="eyebrow">Local playground · no network</p><h1>Universal WebMCP Runtime</h1><p>A friendly manual QA lab for turning an ordinary page into a discoverable, policy-aware tool surface. Try the catalog, inspect what the runtime sees, and run the browser-local checks.</p></div>
+        <div class="badge"><span id="runtime-dot" class="dot"></span><span id="runtime-state">Runtime stopped</span></div>
+      </header>
+
+      <div class="layout">
+        <main class="stack">
+          <section class="card scenario" aria-labelledby="scenario-title">
+            <div class="scenario-top"><div><p class="eyebrow">Demo application</p><h2 id="scenario-title">Northstar Supply catalog</h2></div><button id="menu-button" type="button" aria-expanded="false" aria-controls="quick-menu" data-webmcp-tool="open-quick-menu" data-webmcp-action="click">Quick menu</button></div>
+            <div id="quick-menu" hidden class="search-form"><strong>Quick menu</strong><p class="muted">This menu is part of the local test surface. Nothing leaves the page.</p><button id="menu-close" type="button">Close menu</button></div>
+            <form id="search-form" class="search-form" role="search" aria-label="Product search" data-webmcp-tool="search-products" data-webmcp-action="submit" data-webmcp-description="Search the local product catalog">
+              <div class="form-row"><label for="query">Search products<input id="query" name="query" type="search" placeholder="Try “trail shoes”" autocomplete="off" /></label><button class="primary" type="submit">Search</button></div>
+            </form>
+            <div class="form-row"><label for="category">Category<select id="category" name="category" data-webmcp-tool="filter-category" data-webmcp-action="select"><option value="all">All products</option><option value="footwear">Footwear</option><option value="packs">Packs</option><option value="layers">Layers</option></select></label><label for="sort">Sort<select id="sort" name="sort" data-webmcp-tool="sort-products" data-webmcp-action="select"><option value="featured">Featured</option><option value="price-low">Price: low to high</option><option value="price-high">Price: high to low</option></select></label><span id="result-count" class="muted" aria-live="polite"></span></div>
+            <div class="tabs" role="tablist" aria-label="Catalog views"><button class="tab" id="tab-products" role="tab" aria-selected="true" aria-controls="panel-products" data-webmcp-tool="show-products" data-webmcp-action="click">Products</button><button class="tab" id="tab-saved" role="tab" aria-selected="false" aria-controls="panel-saved" data-webmcp-tool="show-saved" data-webmcp-action="click">Saved items</button></div>
+            <div id="panel-products" class="tab-panel" role="tabpanel" aria-labelledby="tab-products"><div id="product-list" class="product-grid"></div><div class="status-line"><span id="cart-status" role="status">Cart is empty</span><span class="inline"><button id="page-prev" type="button" aria-label="Previous page" data-webmcp-tool="previous-page" data-webmcp-action="click">Previous</button><span id="page-label">Page 1 of 2</span><button id="page-next" type="button" aria-label="Next page" data-webmcp-tool="next-page" data-webmcp-action="click">Next</button></span></div></div>
+            <div id="panel-saved" class="tab-panel" role="tabpanel" aria-labelledby="tab-saved" hidden><p class="muted">Saved items are available locally for this scenario. Switch back to Products to continue.</p></div>
+            <button id="details-button" type="button" data-webmcp-tool="open-product-details" data-webmcp-action="click">Open product details</button>
+            <dialog id="product-dialog" aria-labelledby="dialog-title"><h2 id="dialog-title">Trail shoes details</h2><p class="muted">A modal dialog gives the runtime a realistic interaction target to discover and test.</p><form method="dialog"><button id="dialog-close" type="submit">Close dialog</button></form></dialog>
+          </section>
+
+          <section class="card" aria-labelledby="manual-title"><p class="eyebrow">Community contribution</p><h2 id="manual-title">Manual mapping</h2><p class="muted">Map a stable tool name to a visible control when automatic discovery needs help. The mapping is kept in this page only.</p><div class="manual-grid"><label>Tool name<input id="manual-name" value="community.open-details" /></label><label>CSS selector<input id="manual-selector" value="#details-button" /></label><label>Action<select id="manual-action"><option value="click">click</option><option value="fill">fill</option><option value="select">select</option><option value="submit">submit</option></select></label></div><div class="toolbar" style="margin-top:12px"><button id="add-mapping" class="primary" type="button">Add manual mapping</button><span id="mapping-status" class="muted" role="status">No manual mapping added.</span></div></section>
+        </main>
+
+        <aside class="stack">
+          <section class="card"><div class="toolbar"><div><p class="eyebrow">Runtime controls</p><h2>QA controls</h2></div><div class="inline"><button id="start-runtime" class="primary" type="button">Start runtime</button><button id="stop-runtime" type="button">Stop</button></div></div><div class="toolbar"><button id="run-all" class="primary" type="button">Run all checks</button><button id="reset-scenario" type="button">Reset scenario</button></div><div class="toolbar"><button id="inject-control" type="button">Inject dynamic control</button><button id="remove-control" type="button">Remove dynamic control</button></div><div class="status-line"><span>Tests: <strong id="test-count">0</strong></span><span>Capabilities: <strong id="capability-count">0</strong></span></div></section>
+          <section class="card"><div class="toolbar"><div><p class="eyebrow">What the runtime sees</p><h2>Capability inventory</h2></div><span id="inventory-status" class="pill">waiting</span></div><div class="inventory-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Provenance</th><th>Confidence</th><th>Risk</th><th>Selector</th><th>Status</th></tr></thead><tbody id="inventory-body"><tr><td colspan="7" class="muted">Start the runtime to discover this page.</td></tr></tbody></table></div></section>
+          <section class="card"><p class="eyebrow">Local signals</p><h2>Diagnostics</h2><div id="diagnostics" class="diagnostics">No diagnostics yet.</div></section>
+          <section class="card"><div class="toolbar"><div><p class="eyebrow">Browser-local suite</p><h2>Test runner</h2></div><span id="suite-status" class="pill">not run</span></div><div class="test-summary"><span class="counter">Pass <strong id="pass-count">0</strong></span><span class="counter">Fail <strong id="fail-count">0</strong></span><span class="counter">Total <strong id="total-count">0</strong></span></div><div id="test-list" class="test-list"><p class="muted">Run all checks to exercise discovery and policy.</p></div></section>
+          <section class="card"><div class="toolbar"><div><p class="eyebrow">Event stream</p><h2>Console</h2></div><button id="clear-console" type="button">Clear</button></div><div id="console" class="console">Local console ready. Input values are intentionally not logged.</div></section>
+        </aside>
+      </div>
+    </div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

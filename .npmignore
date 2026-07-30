@@ -1,0 +1,22 @@
+# npm publication is additionally constrained by package.json#files.
+# Keep this list explicit so Git ignore changes cannot widen the package.
+.github/
+.idea/
+.vscode/
+graphify-out/
+node_modules/
+src/
+test/
+test-results/
+playground/
+scripts/
+coverage/
+playwright-report/
+blob-report/
+.env*
+.npmrc
+*.log
+*.map
+docs/
+*.private.md
+*.internal.md
