@@ -8,6 +8,8 @@ Turn an existing web UI into a compact, inspectable tool surface for browser age
 Existing page UI → discover capabilities → apply policy → agent invokes visible UI
 ```
 
+![The Last DOM — turning chaotic page structure into a clean WebMCP tool surface](https://raw.githubusercontent.com/gr3p1p3/universal_webmcp/main/assets/universal-webmcp-last-dom.png)
+
 ## Why teams use it
 
 Most websites are built for people. Agents need the same experience in a form they can reliably inspect and invoke.
