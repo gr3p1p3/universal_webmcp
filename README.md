@@ -2,7 +2,14 @@
 
 Turn an existing web UI into a compact, inspectable tool surface for browser agents — without replacing the frontend, exposing a private API, or moving page data to a server.
 
-[`@gr3p/universal-webmcp`](https://www.npmjs.com/package/@gr3p/universal-webmcp) is a local, open-source runtime that discovers useful UI capabilities, applies safety policy, and optionally registers tools through the browser's native model-context adapter.
+[`@gr3p/universal-webmcp`](https://www.npmjs.com/package/@gr3p/universal-webmcp) addresses both sides of a browser-agent integration:
+
+| If you are… | Use the project to… | Entry point |
+|---|---|---|
+| A web developer | Expose existing forms, actions, navigation, and visible data as policy-governed tools | [Website integration](#website-integration) |
+| An agent user or automation author | Let Codex, Claude, and compatible agents detect or install the runtime, select a compact tool, and avoid repeated page-wide extraction | [Agent integration](#agent-integration) |
+
+Both paths use the same local runtime: `listTools()` returns non-invocable JSON descriptors, while `invokeTool()` operates the visible UI through its existing session, validation, and application feedback. Agent-side injection is used only when the browser host explicitly provides a writable Playwright, Puppeteer, or approved CDP bridge.
 
 ```text
 Existing page UI → discover capabilities → apply policy → agent invokes visible UI
@@ -10,7 +17,7 @@ Existing page UI → discover capabilities → apply policy → agent invokes vi
 
 ![The Last DOM — turning chaotic page structure into a clean WebMCP tool surface](https://raw.githubusercontent.com/gr3p1p3/universal_webmcp/main/assets/universal-webmcp-last-dom.png)
 
-## Why teams use it
+## Design goals
 
 Most websites are built for people. Agents need the same experience in a form they can reliably inspect and invoke.
 
@@ -25,7 +32,7 @@ Universal WebMCP Runtime adds that layer on top of the page you already have:
 
 Typical use cases include e-commerce catalogs, search and filtering, dashboards, internal tools, CRM workflows, browser QA, crawling, and automation.
 
-## Get started in under a minute
+## Website integration
 
 ```sh
 npm install @gr3p/universal-webmcp
@@ -155,7 +162,7 @@ Important defaults and boundaries:
 
 For an agent-facing operating contract, use the provider-neutral [agent skill](skills/universal-webmcp-runtime/SKILL.md). It teaches an agent to detect an existing runtime, install and inject the npm bundle only through a supported browser bridge, cache a compact catalog, invoke structured tools, and fall back safely when injection is unavailable.
 
-## Install the agent skill
+## Agent integration
 
 The skill follows the open Agent Skills folder format and can be used by Codex,
 Claude Code, and compatible agents.
