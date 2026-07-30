@@ -32,6 +32,33 @@ Universal WebMCP Runtime adds that layer on top of the page you already have:
 
 Typical use cases include e-commerce catalogs, search and filtering, dashboards, internal tools, CRM workflows, browser QA, crawling, and automation.
 
+## Measured token footprint
+
+The repository benchmark collects the same complete repeated-record set through five representations and tokenizes each payload with `o200k_base`. WebMCP objects use minified JSON; task prompts and model responses are excluded equally from every path.
+
+Results measured on 2026-07-30:
+
+| Complete collection payload | Controlled fixture, 24/24 records | Public live page, 25/25 records |
+|---|---:|---:|
+| Relevant region HTML | 6,662 | 244,759 |
+| Relevant region ARIA snapshot | 2,901 | 10,342 |
+| WebMCP result with cached catalog | 1,829 | 1,041 |
+| Selected tool descriptor + input + result | 2,084 | 1,302 |
+| Full catalog + input + result | 3,276 | 15,230 |
+
+For the selected-tool path, that is 68.7% fewer tokens than HTML and 28.2% fewer than ARIA in the controlled fixture; on the live page it is 99.5% fewer than HTML and 87.4% fewer than ARIA.
+
+This is not a blanket first-turn claim. The complete cold catalog was 12.9% larger than targeted ARIA in the fixture and 47.3% larger on the live page. The measured advantage depends on selecting the relevant descriptor or caching the catalog; cumulative WebMCP usage became smaller than repeated ARIA snapshots at the second task in both runs.
+
+Reproduce the controlled benchmark locally, or run the explicitly separate live variant:
+
+```sh
+npm run benchmark:tokens
+npm run benchmark:tokens:live
+```
+
+Both commands fail unless the collection reports `complete: true` and matching expected and collected counts. Live results vary with public page content, locale, delivery location, and experiments. Generated JSON and SVG files are written to the ignored `.benchmark/` directory.
+
 ## Website integration
 
 ```sh
