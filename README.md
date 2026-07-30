@@ -1,6 +1,10 @@
 # Universal WebMCP Runtime
 
-Turn an existing web UI into a compact, inspectable tool surface for browser agents — without replacing the frontend, exposing a private API, or moving page data to a server.
+> **Stop feeding the DOM to your AI agent. Give it the tool it needs.**
+
+Universal WebMCP Runtime turns an existing web UI into a compact, inspectable tool surface. Instead of repeatedly serializing page HTML or accessibility trees, an agent can select one capability descriptor, invoke it with structured input, and receive structured JSON from the visible UI.
+
+In the current benchmark, the selected-tool path used 28.2%–87.4% fewer tokens than targeted ARIA snapshots and 68.7%–99.5% fewer than relevant HTML. The [measured results](#measured-token-footprint) also document the important counterexample: an unfiltered cold catalog can be larger than ARIA, so selection and caching are part of the operating model—not optional optimizations.
 
 [`@gr3p/universal-webmcp`](https://www.npmjs.com/package/@gr3p/universal-webmcp) addresses both sides of a browser-agent integration:
 
