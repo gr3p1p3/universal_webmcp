@@ -139,7 +139,10 @@ function isFormMemberDominated(
     && (tag === 'textarea' || (tag === 'input' && ![
       'button', 'submit', 'reset', 'image', 'hidden', 'password', 'file', 'checkbox', 'radio',
     ].includes(type)));
-  return representedTextControl;
+  const representedSubmitter = member.action === 'click'
+    && submitters.length === 1
+    && submitters[0] === member.element;
+  return representedTextControl || representedSubmitter;
 }
 
 /**

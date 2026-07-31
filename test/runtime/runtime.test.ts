@@ -221,7 +221,7 @@ describe('createWebMCPRuntime', () => {
     expect(runtime.getSemanticGraph()).toBeUndefined();
     runtime.start();
     expect(runtime.getSemanticGraph()).toMatchObject({
-      selectedToolNames: ['submit.lookup', 'click.go'],
+      selectedToolNames: ['submit.lookup'],
     });
     expect(runtime.getSemanticGraph()?.nodes.some(
       (node) => node.exclusionReason === 'dominated',
@@ -312,6 +312,20 @@ describe('createWebMCPRuntime', () => {
     window.dispatchEvent(new Event('app:state-ready'));
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(runtime.listTools().map((item) => item.name)).not.toContain('after-stop');
+  });
+
+  it('reconciles tools when an ignore boundary is toggled dynamically', async () => {
+    document.body.innerHTML = '<section id="scope"><button data-webmcp-tool="scoped-action">Action</button></section>';
+    const runtime = createWebMCPRuntime({ observerOptions: { debounceMs: 0 } });
+    runtime.start();
+    expect(runtime.listTools().map((item) => item.name)).toContain('scoped-action');
+
+    document.querySelector('#scope')?.setAttribute('data-webmcp-ignore', '');
+    await vi.waitFor(() => expect(runtime.listTools().map((item) => item.name)).not.toContain('scoped-action'));
+
+    document.querySelector('#scope')?.removeAttribute('data-webmcp-ignore');
+    await vi.waitFor(() => expect(runtime.listTools().map((item) => item.name)).toContain('scoped-action'));
+    runtime.stop();
   });
 
   it('waits for post-action UI stabilization before returning', async () => {

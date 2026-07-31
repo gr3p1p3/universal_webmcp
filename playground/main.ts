@@ -68,7 +68,27 @@ function cell(value: string, className?: string): HTMLTableCellElement {
 }
 const modelContext = new PlaygroundModelContextBridge();
 const adapter = new BrowserModelContextAdapter(modelContext);
-const runtime = createWebMCPRuntime({ root: document, mode: 'hybrid', adapter, autoDiscover: true, observe: true, observerOptions: { debounceMs: 25 } });
+const expectedApplicationToolNames = [
+  'filter-category',
+  'item.add-to-cart.products',
+  'next-page',
+  'open-product-details',
+  'open-quick-menu',
+  'previous-page',
+  'query.products',
+  'search-products',
+  'show-products',
+  'show-saved',
+  'sort-products',
+] as const;
+const runtime = createWebMCPRuntime({
+  root: document,
+  mode: 'hybrid',
+  adapter,
+  autoDiscover: true,
+  observe: true,
+  observerOptions: { debounceMs: 25 },
+});
 let cart = 0;
 let page = 1;
 let dynamicControl: HTMLButtonElement | undefined;
@@ -105,8 +125,8 @@ function renderProducts(): void {
     text(empty, 'No local products match those filters.');
     productList.append(empty);
   }
-  pageItems.forEach((item, index) => {
-    const article = document.createElement('article');
+  pageItems.forEach((item) => {
+    const article = document.createElement('li');
     article.className = 'product';
     article.dataset.product = item.name.toLowerCase().replace(/[^a-z]+/g, '-');
     const heading = document.createElement('h3'); text(heading, item.name);
@@ -114,8 +134,6 @@ function renderProducts(): void {
     const price = document.createElement('span'); price.className = 'price'; text(price, `€${item.price}`);
     const button = document.createElement('button');
     button.type = 'button'; button.className = 'add-to-cart';
-    button.dataset.webmcpTool = `add-to-cart-${index + 1}`;
-    button.dataset.webmcpAction = 'click';
     button.setAttribute('aria-label', `Add ${item.name} to cart`);
     text(button, 'Add to cart');
     article.append(heading, description, price, button);
@@ -240,10 +258,11 @@ function cleanupQaTools(): void {
 }
 
 const checks: Check[] = [
-  { name: 'Discovery finds a useful minimum inventory', run: () => { const names = runtime.listTools().map((tool) => tool.name); if (!names.some((name) => name.includes('search-products')) || !names.some((name) => name.includes('filter-category')) || names.length < 8) throw new Error('expected search, filter, and repeated controls'); } },
-  { name: 'Runtime publishes and revokes agent-facing WebMCP tools', run: () => { runtime.stop(); if (modelContext.registeredTools().length !== 0) throw new Error('bridge retained tools while stopped'); runtime.start(); const names = modelContext.registeredTools().map((tool) => tool.name); if (names.length < 8 || !names.some((name) => name.includes('search-products'))) throw new Error('agent-facing catalog was not registered'); runtime.stop(); if (modelContext.registeredTools().length !== 0) throw new Error('bridge did not revoke registrations'); runtime.start(); } },
+  { name: 'Discovery exposes only the application catalog', run: () => { const names = runtime.listTools().map((tool) => tool.name).sort(); if (JSON.stringify(names) !== JSON.stringify(expectedApplicationToolNames)) throw new Error(`unexpected application catalog: ${names.join(', ')}`); } },
+  { name: 'Runtime publishes and revokes agent-facing WebMCP tools', run: () => { runtime.stop(); if (modelContext.registeredTools().length !== 0) throw new Error('bridge retained tools while stopped'); runtime.start(); const names = modelContext.registeredTools().map((tool) => tool.name); if (JSON.stringify(names) !== JSON.stringify(expectedApplicationToolNames)) throw new Error(`unexpected agent-facing catalog: ${names.join(', ')}`); runtime.stop(); if (modelContext.registeredTools().length !== 0) throw new Error('bridge did not revoke registrations'); runtime.start(); } },
   { name: 'Fill and search stay local', run: async () => { await invokeQaTool('search-products', { fields: { query: 'trail' } }); if (!$('#result-count').textContent?.includes('1')) throw new Error('local search did not filter results'); await invokeQaTool('search-products', { fields: { query: '' } }); } },
   { name: 'Select and filter update the catalog', run: async () => { await invokeQaTool('filter-category', { value: 'packs' }); if (!$('#result-count').textContent?.includes('2')) throw new Error('category filter failed'); await invokeQaTool('filter-category', { value: 'all' }); } },
+  { name: 'Grouped cart action targets one repeated item by index', run: async () => { resetScenario(); await invokeQaTool('item.add-to-cart.products', { index: 1 }); if (!$('#cart-status').textContent?.includes('1 item')) throw new Error('grouped cart action did not update the UI'); } },
   { name: 'Click, tabs, menu, and modal respond', run: async () => { await invokeQaTool('show-saved'); if (!$('#panel-saved').hidden) { /* expected visible */ } else throw new Error('tab did not open'); await invokeQaTool('open-quick-menu'); if ($('#quick-menu').hidden) throw new Error('menu did not open'); await invokeQaTool('open-product-details'); if (!$<HTMLDialogElement>('#product-dialog').open) throw new Error('dialog did not open'); $<HTMLDialogElement>('#product-dialog').close(); await invokeQaTool('show-products'); await invokeQaTool('open-quick-menu'); if (!$('#quick-menu').hidden) throw new Error('menu did not close'); } },
   { name: 'Manual mapping registers a local tool', run: async () => { runtime.unregisterTool('qa.manual-details'); const tool = createManualMappingTool({ name: 'qa.manual-details', selector: '#details-button', action: 'click', root: document, risk: { level: 'low' } }); runtime.registerTool(tool); if (!runtime.listTools().some((item) => item.name === 'qa.manual-details' && item.provenance.source === 'manual')) throw new Error('manual mapping not registered'); await invokeQaTool('qa.manual-details'); if (!$<HTMLDialogElement>('#product-dialog').open) throw new Error('manual mapping did not click the UI'); $<HTMLDialogElement>('#product-dialog').close(); } },
   { name: 'Observer tracks dynamic injection and removal', run: async () => { injectControl(); await new Promise((resolve) => setTimeout(resolve, 60)); if (!runtime.listTools().some((tool) => tool.name.includes('dynamic-local-control'))) throw new Error('injected control not discovered'); removeControl(); await new Promise((resolve) => setTimeout(resolve, 60)); if (runtime.listTools().some((tool) => tool.name.includes('dynamic-local-control'))) throw new Error('removed control still present'); } },

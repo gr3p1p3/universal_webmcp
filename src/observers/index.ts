@@ -32,7 +32,7 @@ const semanticAttributes = [
   'aria-expanded', 'aria-checked', 'aria-pressed', 'aria-current', 'aria-busy',
   'aria-setsize', 'role', 'title', 'name', 'type', 'value', 'placeholder',
   'checked', 'disabled', 'hidden', 'inert', 'href', 'rel', 'id', 'class', 'style',
-  'data-testid', 'data-webmcp-tool', 'data-webmcp-action',
+  'data-testid', 'data-webmcp-tool', 'data-webmcp-action', 'data-webmcp-ignore',
   'data-webmcp-description', 'data-webmcp-total-count', 'data-webmcp-busy',
   'data-total-count', 'data-count',
 ];

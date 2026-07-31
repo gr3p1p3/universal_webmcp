@@ -36,7 +36,6 @@ describe('deterministic UI discovery', () => {
     const tools = discoverUI(document);
     expect(tools.map((tool) => tool.name)).toEqual([
       'submit.account-search',
-      'click.find-account',
     ]);
     expect(tools[0]?.description).toContain('Submits via "Find account"');
     expect(tools[0]?.inputSchema).toMatchObject({
@@ -66,10 +65,9 @@ describe('deterministic UI discovery', () => {
     const graph = analyzeUI(document);
     expect(graph.nodes.filter((node) => node.selected).map((node) => node.name)).toEqual([
       'submit.account-search',
-      'click.find-account',
     ]);
-    expect(graph.nodes.filter((node) => node.exclusionReason === 'dominated')).toHaveLength(1);
-    expect(graph.edges.filter((edge) => edge.relation === 'dominates')).toHaveLength(1);
+    expect(graph.nodes.filter((node) => node.exclusionReason === 'dominated')).toHaveLength(2);
+    expect(graph.edges.filter((edge) => edge.relation === 'dominates')).toHaveLength(2);
   });
 
   it('deduplicates equivalent automatic controls and applies a deterministic catalog budget', () => {
@@ -121,7 +119,6 @@ describe('deterministic UI discovery', () => {
     expect(tools.map((tool) => tool.name)).toEqual([
       'submit.partial',
       'fill.ad-hoc',
-      'click.submit',
     ]);
     const graph = analyzeUI(document);
     expect(graph.nodes.find((node) => node.name === 'fill.represented')?.exclusionReason).toBe('dominated');
@@ -137,6 +134,27 @@ describe('deterministic UI discovery', () => {
       'fill-profile',
       'fill.user',
       'click.save',
+    ]);
+  });
+
+  it('keeps an explicitly declared unique submitter next to its form tool', () => {
+    document.body.innerHTML = `
+      <form id="publish-form">
+        <input name="title">
+        <button type="submit" data-webmcp-tool="publish-now">Publish</button>
+      </form>`;
+    expect(discoverUI(document).map((tool) => tool.name)).toEqual([
+      'submit.publish-form',
+      'publish-now',
+    ]);
+  });
+
+  it('lets a form dominate its unique automatic externally associated submitter', () => {
+    document.body.innerHTML = `
+      <form id="external-submit"><input name="query"></form>
+      <button type="submit" form="external-submit">Search</button>`;
+    expect(discoverUI(document).map((tool) => tool.name)).toEqual([
+      'submit.external-submit',
     ]);
   });
 
@@ -194,10 +212,7 @@ describe('deterministic UI discovery', () => {
       level: 'high',
       requiresConfirmation: true,
     });
-    expect(tools.find((tool) => tool.name === 'click.delete-account')?.risk).toEqual({
-      level: 'high',
-      requiresConfirmation: true,
-    });
+    expect(tools.find((tool) => tool.name === 'click.delete-account')).toBeUndefined();
   });
 
   it('does not reuse non-unique control names as cross-form identities', () => {
@@ -265,7 +280,7 @@ describe('deterministic UI discovery', () => {
       <form id="owned"><button type="submit">Search</button></form>
       <input form="owned" name="external" aria-label="External query">`;
     const tools = discoverUI(document);
-    expect(tools.map((tool) => tool.name)).toEqual(['submit.owned', 'click.search']);
+    expect(tools.map((tool) => tool.name)).toEqual(['submit.owned']);
     expect(tools[0]?.inputSchema).toMatchObject({
       properties: {
         fields: {
@@ -282,7 +297,7 @@ describe('deterministic UI discovery', () => {
         <button type="submit">Save</button>
       </form>`;
     const tools = discoverUI(document);
-    expect(tools.map((tool) => tool.name)).toEqual(['submit.exact-names', 'click.save']);
+    expect(tools.map((tool) => tool.name)).toEqual(['submit.exact-names']);
     const fields = (tools[0]?.inputSchema.properties as {
       fields: { properties: Record<string, unknown> };
     }).fields.properties;
@@ -455,7 +470,6 @@ describe('deterministic UI discovery', () => {
       </form>`;
     expect(discoverUI(document).map((tool) => tool.name)).toEqual([
       'submit.enabled-action',
-      'click.enabled-submit',
     ]);
   });
 
@@ -555,6 +569,32 @@ describe('deterministic UI discovery', () => {
   it('does not turn weak generic DOM patterns into mutating tools', () => {
     document.body.innerHTML = '<div class="btn">Looks like a button</div><div onclick="x()">No semantic role</div>';
     expect(discoverUI(document)).toHaveLength(0);
+  });
+
+  it('excludes marked internal elements and their complete discovery subtree', () => {
+    document.body.innerHTML = `
+      <button id="public-action">Public</button>
+      <section data-webmcp-ignore>
+        <button data-webmcp-tool="internal-action">Internal</button>
+        <ul aria-label="Internal results"><li>One</li><li>Two</li></ul>
+      </section>`;
+    const ignoredHost = document.createElement('div');
+    ignoredHost.setAttribute('data-webmcp-ignore', '');
+    ignoredHost.attachShadow({ mode: 'open' }).innerHTML = '<button>Shadow internal</button>';
+    document.body.append(ignoredHost);
+
+    expect(discoverUI(document).map((tool) => tool.name)).toEqual(['click.public-action']);
+  });
+
+  it('uses semantic list anchors instead of mutable record text in query names', () => {
+    document.body.innerHTML = '<ul id="search-results"><li>Alpha</li><li>Beta</li></ul>';
+    const before = discoverUI(document).find((tool) => tool.kind === 'query');
+    document.querySelector('ul')!.innerHTML = '<li>Gamma</li><li>Delta</li>';
+    const after = discoverUI(document).find((tool) => tool.kind === 'query');
+
+    expect(before?.name).toBe('query.search-results');
+    expect(after?.name).toBe(before?.name);
+    expect(after?.metadata?.semanticId).toBe(before?.metadata?.semanticId);
   });
 
   it('discovers repeated lists as read-only queries and semantic pagination as navigation', async () => {
@@ -690,9 +730,9 @@ describe('deterministic UI discovery', () => {
   it('collapses repeated per-item controls into one indexed action tool', async () => {
     document.body.innerHTML = `
       <ul aria-label="Products">
-        <li><span>Alpha</span><button>Add to cart</button></li>
-        <li><span>Beta</span><button>Add to cart</button></li>
-        <li><span>Gamma</span><button>Add to cart</button></li>
+        <li><span>Alpha</span><button aria-label="Add Alpha to cart">Add to cart</button></li>
+        <li><span>Beta</span><button aria-label="Add Beta to cart">Add to cart</button></li>
+        <li><span>Gamma</span><button aria-label="Add Gamma to cart">Add to cart</button></li>
       </ul>`;
     const clicked: string[] = [];
     for (const button of Array.from(document.querySelectorAll('button'))) {
@@ -715,6 +755,18 @@ describe('deterministic UI discovery', () => {
     expect(await grouped?.handler({ index: 1 })).toMatchObject({ status: 'ok', action: 'click' });
     expect(clicked).toEqual(['BetaAdd to cart']);
     expect(await grouped?.handler({ index: 8 })).toMatchObject({ status: 'error', error: 'record-not-found' });
+  });
+
+  it('keeps an explicitly declared repeated-item control alongside the grouped action', () => {
+    document.body.innerHTML = `
+      <ul aria-label="Jobs">
+        <li><button data-webmcp-tool="open-first">Open</button></li>
+        <li><button>Open</button></li>
+      </ul>`;
+    const tools = discoverUI(document);
+    expect(tools.filter((tool) => tool.metadata?.discovery === 'repeated-item-action')).toHaveLength(1);
+    expect(tools.map((tool) => tool.name)).toContain('open-first');
+    expect(tools.filter((tool) => tool.name.startsWith('click.open'))).toHaveLength(0);
   });
 
   it('only treats same-document fragments as low-risk navigation and ignores javascript URLs', () => {

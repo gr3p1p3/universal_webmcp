@@ -143,9 +143,10 @@ The compiler applies the same precedence on every scan:
 4. ARIA and native HTML controls;
 5. conservative text heuristics.
 
-A complete form dominates only text fields it can address unambiguously.
-Submitters remain visible as separate tools, and a form with one submitter
-activates that control so click handlers and submit intent are preserved.
+A complete form dominates text fields it can address unambiguously and its
+single automatic submitter. The form activates that submitter so click handlers
+and submit intent are preserved without exposing a redundant action tool.
+Explicit submitter tools and ambiguous multiple-submit actions remain visible.
 Ambiguous fields and multiple submit actions remain separate tools. Repeated actions are grouped, declared
 equivalents are deduplicated, and only the highest-ranked automatic candidates
 enter the catalog. Explicit application contracts are never removed by the
@@ -154,6 +155,10 @@ catalog budget.
 Distinct controls are never merged merely because their labels match. A site
 can deliberately collapse interchangeable controls by assigning the same
 `data-webmcp-equivalent` value within one semantic scope.
+
+Application-internal UI can be removed from automatic discovery by adding
+`data-webmcp-ignore` to an element; the marked element and its entire subtree
+are excluded, including open shadow roots and same-origin frames on that host.
 
 Names prefer stable application anchors such as `data-webmcp-tool`, `id`, and
 unique form-control `name`. Each descriptor also carries a
@@ -340,11 +345,16 @@ npm pack --dry-run
 
 The dev command starts the Vite playground. Its **Live WebMCP proof** runs the real
 browser registration adapter against an instrumented `modelContext` bridge and
-shows the exact agent-facing payload. Click **Run live registration proof** to see:
+shows the exact agent-facing payload. The demo catalog is intentionally bounded to
+the application controls (search, filters, catalog views, pagination, product
+details, and cart actions). The manual-mapping editor and the proof, runtime, and
+QA controls remain visible and usable by people, but their containing regions carry
+`data-webmcp-ignore`, the explicit contract for excluding a subtree from discovery.
+Click **Run live registration proof** to see:
 
 ```text
 runtime stopped  →  0 registered tools
-runtime active   →  discovered tools with names, descriptions, schemas, and annotations
+runtime active   →  the application-only tools with names, descriptions, schemas, and annotations
 runtime stopped  →  0 registered tools
 ```
 

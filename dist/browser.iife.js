@@ -518,7 +518,10 @@ var AgentReadyWebMCP = (() => {
   }
   function actionIntent(element) {
     const label = actionLabel(element);
-    if (cartAction.test(label)) return { key: "cart:add", label: "Add to cart" };
+    const visibleLabel = (element.textContent || "").trim().replace(/\s+/g, " ");
+    if (cartAction.test(label) || cartAction.test(visibleLabel)) {
+      return { key: "cart:add", label: "Add to cart" };
+    }
     return { key: label.toLowerCase(), label };
   }
   function repeatedActionControls(record) {
@@ -915,7 +918,8 @@ var AgentReadyWebMCP = (() => {
       "checkbox",
       "radio"
     ].includes(type));
-    return representedTextControl;
+    const representedSubmitter = member.action === "click" && submitters.length === 1 && submitters[0] === member.element;
+    return representedTextControl || representedSubmitter;
   }
   function compileSemanticCandidates(candidates, options = {}) {
     const config = validateOptions(options);
@@ -1050,6 +1054,17 @@ var AgentReadyWebMCP = (() => {
       if ("name" in control && control.name) return control.name;
     }
     return (element.textContent || "").trim().replace(/\s+/g, " ").slice(0, 60);
+  }
+  function repeatedListNameSeed(element) {
+    const labelledBy = element.getAttribute("aria-labelledby")?.split(/\s+/).map((id) => elementByIdInTree(element, id)?.textContent?.trim()).filter((value) => !!value).join(" ");
+    const accessibleName = labelledBy || element.getAttribute("aria-label") || element.getAttribute("title");
+    if (accessibleName) return accessibleName;
+    if (element.id) return element.id;
+    const testId = element.getAttribute("data-testid");
+    if (testId) return testId;
+    const role = element.getAttribute("role");
+    if (role && role !== "list") return role;
+    return "list";
   }
   function explicit(element) {
     return element.hasAttribute("data-webmcp-tool") || element.hasAttribute("data-webmcp-action");
@@ -1379,6 +1394,7 @@ var AgentReadyWebMCP = (() => {
       if (seen.has(current)) return;
       seen.add(current);
       for (const element of elements(current)) {
+        if (element.closest("[data-webmcp-ignore]")) continue;
         const selector = selectorFor(current, element);
         result.push({ root: current, selector, element });
         if (options.includeOpenShadowRoots !== false && element.shadowRoot) visit(element.shadowRoot);
@@ -1440,8 +1456,9 @@ var AgentReadyWebMCP = (() => {
         const isExplicit = explicit(element);
         if (!isExplicit && isAutomaticallyExcluded(element)) continue;
         const repeatedLabel = labelOf(element);
+        const repeatedNameSeed = repeatedListNameSeed(element);
         {
-          const base2 = `query.${slug(repeatedLabel, "list")}`;
+          const base2 = `query.${slug(repeatedNameSeed, "list")}`;
           let name2 = base2;
           let suffix2 = 2;
           while (names.has(name2)) name2 = `${base2}-${suffix2++}`;
@@ -1478,7 +1495,7 @@ var AgentReadyWebMCP = (() => {
               });
               for (const control of repeatedActions.controls) coveredRepeatedActionControls.add(control);
               for (const groupedTool of repeatedActions.tools) {
-                const groupedBase = `${groupedTool.name}.${slug(repeatedLabel, "list")}`;
+                const groupedBase = `${groupedTool.name}.${slug(repeatedNameSeed, "list")}`;
                 let groupedName = groupedBase;
                 let groupedSuffix = 2;
                 while (names.has(groupedName)) groupedName = `${groupedBase}-${groupedSuffix++}`;
@@ -1757,6 +1774,7 @@ var AgentReadyWebMCP = (() => {
     "data-testid",
     "data-webmcp-tool",
     "data-webmcp-action",
+    "data-webmcp-ignore",
     "data-webmcp-description",
     "data-webmcp-total-count",
     "data-webmcp-busy",

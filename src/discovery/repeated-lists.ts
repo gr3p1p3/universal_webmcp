@@ -156,7 +156,10 @@ function actionSlug(value: string): string {
 
 function actionIntent(element: Element): { key: string; label: string } {
   const label = actionLabel(element);
-  if (cartAction.test(label)) return { key: 'cart:add', label: 'Add to cart' };
+  const visibleLabel = (element.textContent || '').trim().replace(/\s+/g, ' ');
+  if (cartAction.test(label) || cartAction.test(visibleLabel)) {
+    return { key: 'cart:add', label: 'Add to cart' };
+  }
   return { key: label.toLowerCase(), label };
 }
 

@@ -90,6 +90,24 @@ function labelOf(element: Element): string {
   return (element.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 60);
 }
 
+function repeatedListNameSeed(element: Element): string {
+  const labelledBy = element.getAttribute('aria-labelledby')
+    ?.split(/\s+/)
+    .map((id) => elementByIdInTree(element, id)?.textContent?.trim())
+    .filter((value): value is string => !!value)
+    .join(' ');
+  const accessibleName = labelledBy
+    || element.getAttribute('aria-label')
+    || element.getAttribute('title');
+  if (accessibleName) return accessibleName;
+  if (element.id) return element.id;
+  const testId = element.getAttribute('data-testid');
+  if (testId) return testId;
+  const role = element.getAttribute('role');
+  if (role && role !== 'list') return role;
+  return 'list';
+}
+
 function explicit(element: Element): boolean {
   return element.hasAttribute('data-webmcp-tool') || element.hasAttribute('data-webmcp-action');
 }
@@ -498,6 +516,9 @@ function contexts(root: ParentNode, options: DiscoveryOptions): RootContext[] {
     if (seen.has(current)) return;
     seen.add(current);
     for (const element of elements(current)) {
+      // This is an application-owned boundary for controls that are useful to
+      // people but are implementation details from an agent's perspective.
+      if (element.closest('[data-webmcp-ignore]')) continue;
       const selector = selectorFor(current, element);
       result.push({ root: current, selector, element });
       if (options.includeOpenShadowRoots !== false && element.shadowRoot) visit(element.shadowRoot);
@@ -569,8 +590,9 @@ export function discoverSemanticUI(
       const isExplicit = explicit(element);
       if (!isExplicit && isAutomaticallyExcluded(element)) continue;
       const repeatedLabel = labelOf(element);
+      const repeatedNameSeed = repeatedListNameSeed(element);
       {
-        const base = `query.${slug(repeatedLabel, 'list')}`;
+        const base = `query.${slug(repeatedNameSeed, 'list')}`;
         let name = base;
         let suffix = 2;
         while (names.has(name)) name = `${base}-${suffix++}`;
@@ -608,7 +630,7 @@ export function discoverSemanticUI(
             });
             for (const control of repeatedActions.controls) coveredRepeatedActionControls.add(control);
             for (const groupedTool of repeatedActions.tools) {
-              const groupedBase = `${groupedTool.name}.${slug(repeatedLabel, 'list')}`;
+              const groupedBase = `${groupedTool.name}.${slug(repeatedNameSeed, 'list')}`;
               let groupedName = groupedBase;
               let groupedSuffix = 2;
               while (names.has(groupedName)) groupedName = `${groupedBase}-${groupedSuffix++}`;
