@@ -338,7 +338,21 @@ npm run dev
 npm pack --dry-run
 ```
 
-The dev command starts the Vite playground. Unit tests use jsdom and do not require a live WebMCP implementation. The Playwright suite runs the built IIFE bundle in Chromium, Firefox, and WebKit and covers discovery, policy, lifecycle, DOM synchronization, and safe invocation.
+The dev command starts the Vite playground. Its **Live WebMCP proof** runs the real
+browser registration adapter against an instrumented `modelContext` bridge and
+shows the exact agent-facing payload. Click **Run live registration proof** to see:
+
+```text
+runtime stopped  →  0 registered tools
+runtime active   →  discovered tools with names, descriptions, schemas, and annotations
+runtime stopped  →  0 registered tools
+```
+
+This is also enforced by `test/e2e/playground.spec.ts`. Unit tests use jsdom and
+do not require a live WebMCP implementation. The Playwright suite opens the
+playground in Chromium, Firefox, and WebKit and verifies discovery, native bridge
+registration and revocation, policy, lifecycle, DOM synchronization, and safe
+invocation.
 
 Live smoke tests are intentionally separate from CI because external-site content and availability are not controlled by this repository:
 

@@ -64,6 +64,12 @@
       .test-row .icon { width: 18px; font-weight: 800; }
       .test-row.pass .icon { color: var(--green); }
       .test-row.fail .icon { color: var(--red); }
+      .proof-flow { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 12px 0; }
+      .proof-step { border: 1px solid var(--line); border-radius: 10px; padding: 10px; text-align: center; background: var(--paper); }
+      .proof-step strong { display: block; font-size: 1.5rem; color: var(--blue); }
+      .agent-tools { margin: 12px 0 0; padding-left: 20px; max-height: 220px; overflow: auto; }
+      .agent-tools li { margin: 5px 0; }
+      .agent-tools code { color: var(--blue); font-weight: 700; }
       .manual-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
       .manual-grid label:last-child { grid-column: 1 / -1; }
       @media (max-width: 980px) { .layout { grid-template-columns: 1fr; } header { display: block; } header .badge { margin-top: 14px; } }
@@ -97,6 +103,7 @@
         </main>
 
         <aside class="stack">
+          <section class="card" aria-labelledby="proof-title"><div class="toolbar"><div><p class="eyebrow">Live WebMCP proof</p><h2 id="proof-title">What the agent actually receives</h2></div><span id="agent-surface-state" class="pill warn">not exposed</span></div><p class="muted">This runs the real registration path through an instrumented <code>modelContext</code> bridge. It records the exact tool objects exposed to an agent.</p><div class="proof-flow"><div class="proof-step"><span>Stopped</span><strong id="proof-before">0</strong><small>registered tools</small></div><div class="proof-step"><span>Runtime active</span><strong id="proof-active">—</strong><small>registered tools</small></div><div class="proof-step"><span>Stopped again</span><strong id="proof-after">—</strong><small>registered tools</small></div></div><div class="toolbar"><button id="run-registration-proof" class="primary" type="button">Run live registration proof</button><span>Agent-facing now: <strong id="agent-tool-count">0</strong></span></div><ul id="agent-tool-list" class="agent-tools"><li class="muted">No tools are registered on the WebMCP bridge.</li></ul><details><summary>Exact registered payload</summary><div id="registration-proof" class="console">Run the proof to capture names, descriptions, schemas, and annotations.</div></details></section>
           <section class="card"><div class="toolbar"><div><p class="eyebrow">Runtime controls</p><h2>QA controls</h2></div><div class="inline"><button id="start-runtime" class="primary" type="button">Start runtime</button><button id="stop-runtime" type="button">Stop</button></div></div><div class="toolbar"><button id="run-all" class="primary" type="button">Run all checks</button><button id="reset-scenario" type="button">Reset scenario</button></div><div class="toolbar"><button id="inject-control" type="button">Inject dynamic control</button><button id="remove-control" type="button">Remove dynamic control</button></div><div class="status-line"><span>Tests: <strong id="test-count">0</strong></span><span>Capabilities: <strong id="capability-count">0</strong></span></div></section>
           <section class="card"><div class="toolbar"><div><p class="eyebrow">What the runtime sees</p><h2>Capability inventory</h2></div><span id="inventory-status" class="pill">waiting</span></div><div class="inventory-wrap"><table><thead><tr><th>Name</th><th>Type</th><th>Provenance</th><th>Confidence</th><th>Risk</th><th>Selector</th><th>Status</th></tr></thead><tbody id="inventory-body"><tr><td colspan="7" class="muted">Start the runtime to discover this page.</td></tr></tbody></table></div></section>
           <section class="card"><p class="eyebrow">Local signals</p><h2>Diagnostics</h2><div id="diagnostics" class="diagnostics">No diagnostics yet.</div></section>

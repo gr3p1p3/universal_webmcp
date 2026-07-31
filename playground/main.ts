@@ -1,9 +1,10 @@
 import {
+  BrowserModelContextAdapter,
   createManualMappingTool,
   createWebMCPRuntime,
   evaluateToolPolicy,
-  MockModelContextAdapter,
   type JsonObject,
+  type JsonValue,
   type RuntimeTool,
 // Vite resolves the playground directly from the library's TypeScript source entry.
 // @ts-expect-error The repository typecheck intentionally does not enable TS-extension imports.
@@ -11,6 +12,41 @@ import {
 
 type Product = { name: string; category: string; price: number; description: string };
 type Check = { name: string; run: () => void | Promise<void> };
+type AgentFacingTool = {
+  readonly name: string;
+  readonly title?: string;
+  readonly description: string;
+  readonly inputSchema: JsonObject;
+  readonly execute: (input: object) => Promise<JsonValue>;
+  readonly annotations: { readonly readOnlyHint: boolean; readonly untrustedContentHint: boolean };
+};
+
+class PlaygroundModelContextBridge {
+  private readonly registrations = new Map<string, AgentFacingTool>();
+  public readonly interactions: JsonObject[] = [];
+  public interactionResult: JsonObject = { confirmed: true };
+
+  public registerTool(
+    tool: AgentFacingTool,
+    options: { readonly signal?: AbortSignal } = {},
+  ): void {
+    this.registrations.set(tool.name, tool);
+    const unregister = (): void => {
+      if (this.registrations.get(tool.name) === tool) this.registrations.delete(tool.name);
+    };
+    if (options.signal?.aborted) unregister();
+    else options.signal?.addEventListener('abort', unregister, { once: true });
+  }
+
+  public async requestUserInteraction(request: JsonObject): Promise<JsonObject> {
+    this.interactions.push(request);
+    return this.interactionResult;
+  }
+
+  public registeredTools(): readonly AgentFacingTool[] {
+    return [...this.registrations.values()].sort((left, right) => left.name.localeCompare(right.name));
+  }
+}
 
 const products: Product[] = [
   { name: 'Trail shoes', category: 'footwear', price: 94, description: 'Light grip for local paths.' },
@@ -30,7 +66,8 @@ function cell(value: string, className?: string): HTMLTableCellElement {
   item.textContent = value;
   return item;
 }
-const adapter = new MockModelContextAdapter();
+const modelContext = new PlaygroundModelContextBridge();
+const adapter = new BrowserModelContextAdapter(modelContext);
 const runtime = createWebMCPRuntime({ root: document, mode: 'hybrid', adapter, autoDiscover: true, observe: true, observerOptions: { debounceMs: 25 } });
 let cart = 0;
 let page = 1;
@@ -92,7 +129,34 @@ function renderProducts(): void {
 
 function updateInventory(): void {
   const tools = runtime.listTools();
+  const agentTools = modelContext.registeredTools();
   text($('#capability-count'), String(tools.length));
+  text($('#agent-tool-count'), String(agentTools.length));
+  text($('#agent-surface-state'), runtime.isRunning() ? 'exposed to agents' : 'not exposed');
+  $('#agent-surface-state').className = `pill${runtime.isRunning() ? '' : ' warn'}`;
+  const agentSurface = $('#agent-tool-list');
+  clear(agentSurface);
+  if (agentTools.length === 0) {
+    const empty = document.createElement('li');
+    empty.className = 'muted';
+    text(empty, 'No tools are registered on the WebMCP bridge.');
+    agentSurface.append(empty);
+  }
+  agentTools.slice(0, 8).forEach((tool) => {
+    const item = document.createElement('li');
+    const name = document.createElement('code');
+    text(name, tool.name);
+    const detail = document.createElement('span');
+    text(detail, ` — ${tool.description}`);
+    item.append(name, detail);
+    agentSurface.append(item);
+  });
+  if (agentTools.length > 8) {
+    const remainder = document.createElement('li');
+    remainder.className = 'muted';
+    text(remainder, `…and ${agentTools.length - 8} more registered tools`);
+    agentSurface.append(remainder);
+  }
   text($('#inventory-status'), runtime.isRunning() ? 'live' : 'stopped');
   $('#inventory-status').className = `pill${runtime.isRunning() ? '' : ' warn'}`;
   const inventory = $('#inventory-body');
@@ -111,6 +175,32 @@ function updateInventory(): void {
   });
   const diagnostics = runtime.diagnostics;
   text($('#diagnostics'), diagnostics.length ? diagnostics.map((item) => `${item.code}${item.toolName ? ` · ${item.toolName}` : ''}: ${item.message}`).join('\n') : 'No diagnostics. The runtime is keeping all activity in this page.');
+}
+
+function runRegistrationProof(): void {
+  runtime.stop();
+  const before = modelContext.registeredTools().length;
+  runtime.start();
+  const activeTools = modelContext.registeredTools();
+  runtime.stop();
+  const after = modelContext.registeredTools().length;
+  runtime.start();
+
+  text($('#proof-before'), String(before));
+  text($('#proof-active'), String(activeTools.length));
+  text($('#proof-after'), String(after));
+  text($('#registration-proof'), JSON.stringify({
+    runtimeStopped: before,
+    runtimeActive: activeTools.map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      inputSchema: tool.inputSchema,
+      annotations: tool.annotations,
+    })),
+    runtimeStoppedAgain: after,
+  }, null, 2));
+  setRuntimeState();
+  log(`registration proof: ${before} stopped → ${activeTools.length} active → ${after} stopped`);
 }
 
 function setRuntimeState(): void {
@@ -151,13 +241,14 @@ function cleanupQaTools(): void {
 
 const checks: Check[] = [
   { name: 'Discovery finds a useful minimum inventory', run: () => { const names = runtime.listTools().map((tool) => tool.name); if (!names.some((name) => name.includes('search-products')) || !names.some((name) => name.includes('filter-category')) || names.length < 8) throw new Error('expected search, filter, and repeated controls'); } },
+  { name: 'Runtime publishes and revokes agent-facing WebMCP tools', run: () => { runtime.stop(); if (modelContext.registeredTools().length !== 0) throw new Error('bridge retained tools while stopped'); runtime.start(); const names = modelContext.registeredTools().map((tool) => tool.name); if (names.length < 8 || !names.some((name) => name.includes('search-products'))) throw new Error('agent-facing catalog was not registered'); runtime.stop(); if (modelContext.registeredTools().length !== 0) throw new Error('bridge did not revoke registrations'); runtime.start(); } },
   { name: 'Fill and search stay local', run: async () => { await invokeQaTool('search-products', { fields: { query: 'trail' } }); if (!$('#result-count').textContent?.includes('1')) throw new Error('local search did not filter results'); await invokeQaTool('search-products', { fields: { query: '' } }); } },
   { name: 'Select and filter update the catalog', run: async () => { await invokeQaTool('filter-category', { value: 'packs' }); if (!$('#result-count').textContent?.includes('2')) throw new Error('category filter failed'); await invokeQaTool('filter-category', { value: 'all' }); } },
   { name: 'Click, tabs, menu, and modal respond', run: async () => { await invokeQaTool('show-saved'); if (!$('#panel-saved').hidden) { /* expected visible */ } else throw new Error('tab did not open'); await invokeQaTool('open-quick-menu'); if ($('#quick-menu').hidden) throw new Error('menu did not open'); await invokeQaTool('open-product-details'); if (!$<HTMLDialogElement>('#product-dialog').open) throw new Error('dialog did not open'); $<HTMLDialogElement>('#product-dialog').close(); await invokeQaTool('show-products'); await invokeQaTool('open-quick-menu'); if (!$('#quick-menu').hidden) throw new Error('menu did not close'); } },
   { name: 'Manual mapping registers a local tool', run: async () => { runtime.unregisterTool('qa.manual-details'); const tool = createManualMappingTool({ name: 'qa.manual-details', selector: '#details-button', action: 'click', root: document, risk: { level: 'low' } }); runtime.registerTool(tool); if (!runtime.listTools().some((item) => item.name === 'qa.manual-details' && item.provenance.source === 'manual')) throw new Error('manual mapping not registered'); await invokeQaTool('qa.manual-details'); if (!$<HTMLDialogElement>('#product-dialog').open) throw new Error('manual mapping did not click the UI'); $<HTMLDialogElement>('#product-dialog').close(); } },
   { name: 'Observer tracks dynamic injection and removal', run: async () => { injectControl(); await new Promise((resolve) => setTimeout(resolve, 60)); if (!runtime.listTools().some((tool) => tool.name.includes('dynamic-local-control'))) throw new Error('injected control not discovered'); removeControl(); await new Promise((resolve) => setTimeout(resolve, 60)); if (runtime.listTools().some((tool) => tool.name.includes('dynamic-local-control'))) throw new Error('removed control still present'); } },
   { name: 'Policy denies critical tools without invoking them', run: () => { const critical: RuntimeTool = { name: 'qa.critical', description: 'A local policy fixture', kind: 'action', inputSchema: { type: 'object' }, risk: { level: 'critical' }, provenance: { source: 'manual', confidence: 1 }, handler: () => { throw new Error('must not invoke'); } }; const decision = evaluateToolPolicy(critical, 'hybrid'); if (decision.decision !== 'deny') throw new Error(`expected deny, got ${decision.decision}`); } },
-  { name: 'Policy confirms a risky local action', run: async () => { runtime.unregisterTool('qa.confirmed-details'); resetScenario(); const risky = createManualMappingTool({ name: 'qa.confirmed-details', selector: '#details-button', action: 'click', root: document, risk: { level: 'high' } }); runtime.registerTool(risky); const decision = runtime.getPolicyDecision(risky); if (decision?.decision !== 'confirm') throw new Error('expected confirmation'); adapter.interactionResult = { confirmed: false }; const rejectedInteractions = adapter.interactions.length; const blocked = await runtime.invokeTool(risky.name, {}); if ((blocked as { status?: string }).status !== 'blocked' || adapter.interactions.length !== rejectedInteractions + 1 || $<HTMLDialogElement>('#product-dialog').open) throw new Error('rejected call was not blocked before click'); adapter.interactionResult = { confirmed: true }; const allowedInteractions = adapter.interactions.length; const allowed = await runtime.invokeTool(risky.name, {}); if ((allowed as { status?: string }).status !== 'ok' || adapter.interactions.length !== allowedInteractions + 1 || !$<HTMLDialogElement>('#product-dialog').open) throw new Error('confirmed call did not click the UI'); $<HTMLDialogElement>('#product-dialog').close(); adapter.interactionResult = { confirmed: true }; } },
+  { name: 'Policy confirms a risky local action', run: async () => { runtime.unregisterTool('qa.confirmed-details'); resetScenario(); const risky = createManualMappingTool({ name: 'qa.confirmed-details', selector: '#details-button', action: 'click', root: document, risk: { level: 'high' } }); runtime.registerTool(risky); const decision = runtime.getPolicyDecision(risky); if (decision?.decision !== 'confirm') throw new Error('expected confirmation'); modelContext.interactionResult = { confirmed: false }; const rejectedInteractions = modelContext.interactions.length; const blocked = await runtime.invokeTool(risky.name, {}); if ((blocked as { status?: string }).status !== 'blocked' || modelContext.interactions.length !== rejectedInteractions + 1 || $<HTMLDialogElement>('#product-dialog').open) throw new Error('rejected call was not blocked before click'); modelContext.interactionResult = { confirmed: true }; const allowedInteractions = modelContext.interactions.length; const allowed = await runtime.invokeTool(risky.name, {}); if ((allowed as { status?: string }).status !== 'ok' || modelContext.interactions.length !== allowedInteractions + 1 || !$<HTMLDialogElement>('#product-dialog').open) throw new Error('confirmed call did not click the UI'); $<HTMLDialogElement>('#product-dialog').close(); modelContext.interactionResult = { confirmed: true }; } },
 ];
 
 async function runAll(): Promise<void> {
@@ -188,7 +279,7 @@ $('#details-button').addEventListener('click', () => $<HTMLDialogElement>('#prod
 $('#tab-products').addEventListener('click', () => { $('#tab-products').setAttribute('aria-selected', 'true'); $('#tab-saved').setAttribute('aria-selected', 'false'); $('#panel-products').hidden = false; $('#panel-saved').hidden = true; });
 $('#tab-saved').addEventListener('click', () => { $('#tab-products').setAttribute('aria-selected', 'false'); $('#tab-saved').setAttribute('aria-selected', 'true'); $('#panel-products').hidden = true; $('#panel-saved').hidden = false; });
 $('#page-prev').addEventListener('click', () => { page = Math.max(1, page - 1); renderProducts(); }); $('#page-next').addEventListener('click', () => { page += 1; renderProducts(); });
-$('#start-runtime').addEventListener('click', () => { runtime.start(); setRuntimeState(); log('runtime started'); }); $('#stop-runtime').addEventListener('click', () => { runtime.stop(); setRuntimeState(); log('runtime stopped'); }); $('#reset-scenario').addEventListener('click', resetScenario); $('#inject-control').addEventListener('click', injectControl); $('#remove-control').addEventListener('click', removeControl); $('#run-all').addEventListener('click', () => { void runAll(); }); $('#clear-console').addEventListener('click', () => { $('#console').textContent = 'Local console cleared. Input values are intentionally not logged.'; });
+$('#start-runtime').addEventListener('click', () => { runtime.start(); setRuntimeState(); log('runtime started'); }); $('#stop-runtime').addEventListener('click', () => { runtime.stop(); setRuntimeState(); log('runtime stopped'); }); $('#run-registration-proof').addEventListener('click', runRegistrationProof); $('#reset-scenario').addEventListener('click', resetScenario); $('#inject-control').addEventListener('click', injectControl); $('#remove-control').addEventListener('click', removeControl); $('#run-all').addEventListener('click', () => { void runAll(); }); $('#clear-console').addEventListener('click', () => { $('#console').textContent = 'Local console cleared. Input values are intentionally not logged.'; });
 $('#add-mapping').addEventListener('click', () => { try { const tool = createManualMappingTool({ name: $<HTMLInputElement>('#manual-name').value.trim(), selector: $<HTMLInputElement>('#manual-selector').value.trim(), action: $<HTMLSelectElement>('#manual-action').value as 'click' | 'fill' | 'select' | 'submit', root: document, risk: { level: 'low' } }); runtime.registerTool(tool); $('#mapping-status').textContent = `Mapped ${tool.name} locally.`; log('manual mapping added (name and selector are not echoed)'); updateInventory(); } catch { $('#mapping-status').textContent = 'Mapping could not be added. Check the name and selector.'; } });
 
-renderProducts(); runtime.start(); setRuntimeState(); log('runtime started with mock adapter; no network calls');
+renderProducts(); runtime.start(); setRuntimeState(); log('runtime started with an instrumented WebMCP bridge; no network calls');
