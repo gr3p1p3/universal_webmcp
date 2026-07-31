@@ -1,54 +1,59 @@
 # Browser bridge installation and injection
 
-Read this file only after the capability gate in `SKILL.md` establishes that
-the selected browser supports writable Playwright, Puppeteer, or explicitly
-approved CDP script injection.
+Read this reference only after the capability gate confirms a writable
+Playwright, Puppeteer, or explicitly approved full-CDP page context.
 
 ## Contents
 
-- Local npm installation
-- Playwright injection
-- Puppeteer injection
-- Remote bundle fallback
-- Restricted browser hosts
+- Prerequisites and local bundle resolution
+- Playwright and Puppeteer injection
+- Permissioned remote fallback
 - Navigation and cleanup
 
-## Local npm installation
+## Prerequisites
 
-Prefer an already installed compatible version. Otherwise, install the runtime
-in the browser automation project without changing its declared dependencies:
+- Use Node.js 20 or newer.
+- Prefer an already installed compatible package.
+- Do not install globally or change a website's declared dependencies unless the
+  user requested application integration.
+- Stop if browser policy, Content Security Policy, or Trusted Types blocks
+  injection. Do not weaken the policy.
+
+## Resolve the local bundle
+
+For a disposable automation workspace or isolated temporary Node project:
 
 ```sh
-npm install --no-save --package-lock=false @gr3p/universal-webmcp
+npm install --no-save --package-lock=false @gr3p/universal-webmcp@0.2.1
 ```
 
-Do not install globally. Do not install into a website's production project
-unless the user asked to integrate that application. For disposable browsing,
-use the automation workspace or an isolated temporary Node project.
-
-Resolve the exported IIFE through the package export map rather than guessing a
-`node_modules` path:
+Resolve the public export instead of guessing a `node_modules` path:
 
 ```js
 import { createRequire } from 'node:module';
+import { randomUUID } from 'node:crypto';
 
 const require = createRequire(import.meta.url);
 const webmcpBundlePath = require.resolve(
   '@gr3p/universal-webmcp/browser.iife.js',
 );
+const webmcpOwnerToken = randomUUID();
 ```
 
-## Playwright injection
+## Inject with Playwright
 
-Use this only with a Playwright `Page` that supports `addScriptTag` and writable
-`evaluate`:
+Use a `Page` that supports `addScriptTag` and writable `evaluate`:
 
 ```js
 await page.addScriptTag({ path: webmcpBundlePath });
 
-await page.evaluate(() => {
+await page.evaluate(({ ownerToken }) => {
   const previous = globalThis.__agentReadyWebMCP;
-  if (previous?.owner === 'agent') previous.runtime.destroy();
+  if (previous?.owner === 'agent' && previous.ownerToken === ownerToken) {
+    previous.runtime.destroy();
+  } else if (previous) {
+    throw new Error('A different WebMCP agent bridge already owns this page.');
+  }
 
   const runtime = globalThis.AgentReadyWebMCP.createWebMCPRuntime({
     mode: 'hybrid',
@@ -57,138 +62,85 @@ await page.evaluate(() => {
     observe: true,
   });
 
-  globalThis.__agentReadyWebMCP = {
-    owner: 'agent',
-    runtime,
-  };
-});
+  globalThis.__agentReadyWebMCP = { owner: 'agent', ownerToken, runtime };
+}, { ownerToken: webmcpOwnerToken });
 ```
 
-Read a compact catalog across the browser boundary:
-
-```js
-const catalog = await page.evaluate(() => {
-  const runtime =
-    globalThis.__agentReadyWebMCP?.runtime ??
-    globalThis.AgentReadyWebMCP?.autoRuntime;
-
-  if (!runtime) return [];
-
-  return runtime.listTools()
-    .filter((tool) =>
-      tool.status !== 'unavailable' &&
-      tool.status !== 'deprecated' &&
-      tool.lifecycle !== 'disabled' &&
-      tool.lifecycle !== 'removed')
-    .map(({
-      name,
-      description,
-      kind,
-      inputSchema,
-      outputSchema,
-      risk,
-      provenance,
-      targetUI,
-      status,
-      lifecycle,
-    }) => ({
-      name,
-      description,
-      kind,
-      inputSchema,
-      outputSchema,
-      risk,
-      provenance,
-      targetUI,
-      status,
-      lifecycle,
-    }));
-});
-```
-
-Invoke one selected tool:
+Run the compact-index and selected-descriptor snippets from `SKILL.md` inside
+`page.evaluate`. Pass only JSON-compatible names and inputs across the boundary:
 
 ```js
 const result = await page.evaluate(
   async ({ name, input }) => {
     const runtime =
-      globalThis.__agentReadyWebMCP?.runtime ??
-      globalThis.AgentReadyWebMCP?.autoRuntime;
-    if (!runtime) return { status: 'error', code: 'runtime-unavailable' };
+      globalThis.AgentReadyWebMCP?.autoRuntime ??
+      globalThis.__agentReadyWebMCP?.runtime;
+    if (!runtime) {
+      return { status: 'error', error: 'runtime-unavailable' };
+    }
     return runtime.invokeTool(name, input);
   },
-  { name: selectedTool.name, input },
+  { name: selectedDescriptor.name, input },
 );
 ```
 
-## Puppeteer injection
+## Inject with Puppeteer
 
-Puppeteer can inject the same local bundle:
+Use the same local bundle and initialization:
 
 ```js
 await page.addScriptTag({ path: webmcpBundlePath });
 ```
 
-Then use the Playwright initialization, catalog, and invocation page functions
-unchanged through Puppeteer's writable `page.evaluate`.
+The page functions above work unchanged through Puppeteer's writable
+`page.evaluate`.
 
-## Remote bundle fallback
+## Coordinate full navigation
 
-Use a remote bundle only when local npm installation is unavailable and the
-user permits loading a public third-party resource into the page. Prefer a
-version-pinned npm-backed URL:
+For a tool expected to replace the document, arm the browser host's documented
+main-frame navigation wait before invoking it and await both operations
+together. If navigation succeeds while `page.evaluate` rejects because its
+execution context was destroyed, treat the invocation result as indeterminate,
+verify the destination, and do not retry a mutation solely because the result
+could not cross the old document boundary.
+
+For same-document navigation, await the declared URL or visible-state change
+and keep the current runtime. After full navigation, discard every descriptor,
+runtime handle, and selector from the old document before re-running the gate.
+
+## Use a remote bundle only with permission
+
+Use a public remote bundle only when local package injection is unavailable and
+the user permits loading third-party code into the page. Pin the verified
+release:
 
 ```js
 await page.addScriptTag({
-  url: 'https://cdn.jsdelivr.net/npm/@gr3p/universal-webmcp@0.1.3/dist/browser.iife.js',
+  url: 'https://cdn.jsdelivr.net/npm/@gr3p/universal-webmcp@0.2.1/dist/browser.iife.js',
 });
 ```
 
-Then initialize `__agentReadyWebMCP` exactly as shown above. Do not use an
-unpinned URL for repeatable QA or production automation.
+Initialize the agent-owned bridge exactly as above. Do not use an unpinned URL
+for repeatable automation.
 
-If Content Security Policy, Trusted Types, browser policy, or the site blocks
-the script, stop. Do not weaken the site's policy or switch to an address-bar
-or bookmarklet workaround.
+## Navigate and clean up
 
-## Restricted browser hosts
-
-Some browser hosts expose only clicks, typing, screenshots, semantic snapshots,
-and read-only evaluation. In that environment:
-
-1. Check for native WebMCP tools or an existing
-   `AgentReadyWebMCP.autoRuntime`.
-2. Use them when present.
-3. Otherwise return to targeted semantic browser operations.
-
-Do not call `addScriptTag`, mutate the document in `evaluate`, navigate to a
-`javascript:` URL, or use a page form to execute code when the host does not
-document that capability.
-
-Codex Developer mode/full CDP is a separate privileged path. Obtain the
-approval required by the Codex browser host before using it, and use only its
-documented CDP methods. Do not treat skill installation as approval for CDP.
-
-## Navigation and cleanup
-
-A document navigation destroys the injected runtime and its bridge. After the
-new document reaches the required load state:
-
-1. Re-run the capability gate.
-2. Re-inject only when still permitted.
-3. Read a new compact catalog.
-
-For same-document SPA transitions, keep the existing runtime and use
-`waitForIdle()`, `waitForTool(name)`, or one catalog refresh.
+A full document navigation destroys the injected bundle, runtime, and bridge.
+After load, re-run the capability gate and inject only if the new page and host
+still permit it. Keep the runtime for same-document transitions and synchronize
+with `waitForIdle()`, `waitForTool()`, or one `refresh()`.
 
 Before releasing a page that did not navigate, destroy only the agent-owned
 runtime:
 
 ```js
-await page.evaluate(() => {
-  if (globalThis.__agentReadyWebMCP?.owner === 'agent') {
-    globalThis.__agentReadyWebMCP.runtime.destroy();
+await page.evaluate(({ ownerToken }) => {
+  const bridge = globalThis.__agentReadyWebMCP;
+  if (bridge?.owner === 'agent' && bridge.ownerToken === ownerToken) {
+    bridge.runtime.destroy();
     delete globalThis.__agentReadyWebMCP;
   }
-});
+}, { ownerToken: webmcpOwnerToken });
 ```
+
+Never destroy a site-owned `AgentReadyWebMCP.autoRuntime`.
