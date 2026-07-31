@@ -2,7 +2,13 @@ import type { JsonObject, JsonValue, RuntimeTool } from '../core/model.js';
 
 export interface ToolRegistration {
   readonly name: string;
-  readonly registrationId?: string;
+  /** Resolves when an asynchronous platform registration becomes active. */
+  readonly ready?: PromiseLike<void>;
+}
+
+export interface BrowserModelContextAdapterOptions {
+  /** Secure origins allowed to discover and invoke registered tools. */
+  readonly exposedTo?: readonly string[];
 }
 
 /** JSON-compatible payload; the standard does not yet fix a request schema. */
@@ -13,14 +19,33 @@ export type UserInteractionResult = JsonObject;
 
 export interface ModelContextAdapter {
   isAvailable(): boolean;
+  /**
+   * Must synchronously establish a registration that unregisterTool() can
+   * cancel, even while the optional ready promise is still pending.
+   */
   registerTool(tool: RuntimeTool): ToolRegistration;
+  /** Cancels both pending and active registrations for this name. */
   unregisterTool(name: string): void;
   requestUserInteraction?(request: UserInteractionRequest): Promise<UserInteractionResult>;
 }
 
+interface NativeModelContextTool {
+  readonly name: string;
+  readonly title?: string;
+  readonly description: string;
+  readonly inputSchema: JsonObject;
+  readonly execute: (input: object) => Promise<JsonValue>;
+  readonly annotations: {
+    readonly readOnlyHint: boolean;
+    readonly untrustedContentHint: boolean;
+  };
+}
+
 interface ModelContextBridge {
-  registerTool(tool: RuntimeTool): unknown;
-  unregisterTool(name: string): unknown;
+  registerTool(
+    tool: NativeModelContextTool,
+    options?: { readonly signal?: AbortSignal; readonly exposedTo?: readonly string[] },
+  ): PromiseLike<unknown> | unknown;
   requestUserInteraction?(request: UserInteractionRequest): Promise<unknown>;
 }
 
@@ -30,8 +55,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isBridge(value: unknown): value is ModelContextBridge {
   return isRecord(value)
-    && typeof value.registerTool === 'function'
-    && typeof value.unregisterTool === 'function';
+    && typeof value.registerTool === 'function';
 }
 
 /** The sole browser-global lookup for a model context. */
@@ -39,32 +63,69 @@ export function getModelContext(): ModelContextBridge | null {
   if (typeof globalThis === 'undefined') return null;
   const browserDocument = 'document' in globalThis ? (globalThis as { document?: unknown }).document : undefined;
   if (isRecord(browserDocument) && isBridge(browserDocument.modelContext)) return browserDocument.modelContext;
-  const browserNavigator = 'navigator' in globalThis ? (globalThis as { navigator?: unknown }).navigator : undefined;
-  if (isRecord(browserNavigator) && isBridge(browserNavigator.modelContext)) return browserNavigator.modelContext;
   return null;
 }
 
-function registrationHandle(name: string, value: unknown): ToolRegistration {
-  if (typeof value === 'string') return { name, registrationId: value };
-  if (isRecord(value) && typeof value.registrationId === 'string') {
-    return { name, registrationId: value.registrationId };
-  }
-  return { name };
+function isUntrustedOutput(tool: RuntimeTool): boolean {
+  return tool.provenance.source === 'discovery'
+    || tool.provenance.source === 'heuristic'
+    || tool.provenance.source === 'imported';
+}
+
+function nativeTool(tool: RuntimeTool): NativeModelContextTool {
+  const title = tool.title ?? tool.targetUI?.label;
+  return {
+    name: tool.name,
+    ...(title ? { title } : {}),
+    description: tool.description,
+    inputSchema: tool.inputSchema,
+    execute: async (input): Promise<JsonValue> => {
+      if (!isRecord(input) || Array.isArray(input)) {
+        throw new TypeError('WebMCP tool input must be an object.');
+      }
+      return tool.handler(input as JsonObject);
+    },
+    annotations: {
+      readOnlyHint: tool.annotations?.readOnlyHint ?? tool.kind === 'query',
+      untrustedContentHint: tool.annotations?.untrustedContentHint ?? isUntrustedOutput(tool),
+    },
+  };
 }
 
 /** Structural adapter: only verified bridge methods are called. */
 export class BrowserModelContextAdapter implements ModelContextAdapter {
-  public constructor(private readonly context: unknown = getModelContext()) {}
+  private readonly controllers = new Map<string, AbortController>();
+
+  public constructor(
+    private readonly context: unknown = getModelContext(),
+    private readonly options: BrowserModelContextAdapterOptions = {},
+  ) {}
 
   public isAvailable(): boolean { return isBridge(this.context); }
 
   public registerTool(tool: RuntimeTool): ToolRegistration {
     if (!isBridge(this.context)) throw new Error('Model context is unavailable.');
-    return registrationHandle(tool.name, this.context.registerTool(tool));
+    this.unregisterTool(tool.name);
+    const controller = new AbortController();
+    this.controllers.set(tool.name, controller);
+    const ready = Promise.resolve(
+      this.context.registerTool(nativeTool(tool), {
+        signal: controller.signal,
+        ...(this.options.exposedTo === undefined ? {} : { exposedTo: [...this.options.exposedTo] }),
+      }),
+    ).then(() => undefined).catch((error: unknown) => {
+      if (controller.signal.aborted) return;
+      if (this.controllers.get(tool.name) === controller) this.controllers.delete(tool.name);
+      throw error;
+    });
+    return { name: tool.name, ready };
   }
 
   public unregisterTool(name: string): void {
-    if (isBridge(this.context)) this.context.unregisterTool(name);
+    const controller = this.controllers.get(name);
+    if (!controller) return;
+    this.controllers.delete(name);
+    controller.abort();
   }
 
   public async requestUserInteraction(request: UserInteractionRequest): Promise<UserInteractionResult> {
@@ -84,7 +145,7 @@ export class MockModelContextAdapter implements ModelContextAdapter {
   public isAvailable(): boolean { return true; }
 
   public registerTool(tool: RuntimeTool): ToolRegistration {
-    const handle = { name: tool.name, registrationId: `mock:${tool.name}` };
+    const handle = { name: tool.name };
     this.registrations.set(tool.name, handle);
     return handle;
   }

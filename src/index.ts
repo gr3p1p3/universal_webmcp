@@ -15,6 +15,7 @@ export type {
   RuntimeToolHandler,
   RuntimeToolDescriptor,
   TargetUI,
+  ToolAnnotations,
 } from './core/model.js';
 export {
   createManualMappingTool,
@@ -74,6 +75,7 @@ export type {
 } from './runtime/index.js';
 export type {
   ModelContextAdapter,
+  BrowserModelContextAdapterOptions,
   ToolRegistration,
   UserInteractionRequest,
   UserInteractionResult,

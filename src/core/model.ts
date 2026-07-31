@@ -37,16 +37,24 @@ export interface TargetUI {
   readonly description?: string;
 }
 
+/** WebMCP-standard hints exposed to the browser agent. */
+export interface ToolAnnotations {
+  readonly readOnlyHint?: boolean;
+  readonly untrustedContentHint?: boolean;
+}
+
 export type RuntimeToolHandler = (
   input: JsonObject,
 ) => JsonValue | PromiseLike<JsonValue>;
 
 export interface RuntimeTool {
   readonly name: string;
+  readonly title?: string;
   readonly description: string;
   readonly kind: CapabilityKind;
   readonly inputSchema: JsonObject;
   readonly outputSchema?: JsonObject;
+  readonly annotations?: ToolAnnotations;
   readonly risk: CapabilityRisk;
   readonly provenance: CapabilityProvenance;
   readonly targetUI?: TargetUI;

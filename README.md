@@ -127,6 +127,13 @@ The GitHub Pages URL follows the current `main` build. Prefer the version-pinned
 | Native tool registration | Share approved tools with a browser model-context implementation | Optional adapter |
 | Synchronization | Wait for a tool or for the UI to become idle | `refresh()`, `waitForTool()`, `waitForIdle()` |
 
+Native registration follows the current WebMCP draft: tools are registered with
+`document.modelContext.registerTool()`, internal handlers are exposed as
+`execute` callbacks, and each registration is removed by aborting the
+`AbortSignal` supplied at registration time. The deprecated
+`navigator.modelContext` and non-standard `unregisterTool(name)` API are not
+used.
+
 The runtime supports four modes:
 
 - `hybrid` — explicit and adapter-provided tools plus local discovery; the default.

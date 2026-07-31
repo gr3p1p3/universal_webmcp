@@ -70,7 +70,7 @@ var AgentReadyWebMCP = (() => {
   };
 
   // src/core/registry.ts
-  var namePattern = /^[A-Za-z][A-Za-z0-9._-]*$/;
+  var namePattern = /^[A-Za-z0-9._-]{1,128}$/;
   function isJsonObject(value) {
     return typeof value === "object" && value !== null && !Array.isArray(value);
   }
@@ -90,8 +90,11 @@ var AgentReadyWebMCP = (() => {
   function validateTool(tool) {
     if (!tool.name.trim() || !namePattern.test(tool.name)) {
       throw new CapabilityValidationError(
-        "Capability name must be a non-empty stable identifier (letters, digits, ., _, -)."
+        "Capability name must be 1-128 ASCII letters, digits, ., _, or -."
       );
+    }
+    if (tool.title !== void 0 && typeof tool.title !== "string") {
+      throw new CapabilityValidationError("Capability title must be a string when provided.");
     }
     if (!tool.description.trim()) throw new CapabilityValidationError("Capability description cannot be empty.");
     if (!isJsonObject(tool.inputSchema)) throw new CapabilityValidationError("Capability inputSchema must be an object.");
@@ -100,6 +103,17 @@ var AgentReadyWebMCP = (() => {
     }
     if (!Number.isFinite(tool.provenance.confidence) || tool.provenance.confidence < 0 || tool.provenance.confidence > 1) {
       throw new CapabilityValidationError("Capability confidence must be a number between 0 and 1.");
+    }
+    if (tool.annotations !== void 0) {
+      if (!isJsonObject(tool.annotations)) {
+        throw new CapabilityValidationError("Capability annotations must be an object when provided.");
+      }
+      if (tool.annotations.readOnlyHint !== void 0 && typeof tool.annotations.readOnlyHint !== "boolean") {
+        throw new CapabilityValidationError("Capability readOnlyHint must be a boolean when provided.");
+      }
+      if (tool.annotations.untrustedContentHint !== void 0 && typeof tool.annotations.untrustedContentHint !== "boolean") {
+        throw new CapabilityValidationError("Capability untrustedContentHint must be a boolean when provided.");
+      }
     }
   }
   function copyTool(tool) {
@@ -110,6 +124,10 @@ var AgentReadyWebMCP = (() => {
       risk: { ...tool.risk },
       provenance: { ...tool.provenance },
       targetUI: tool.targetUI === void 0 ? void 0 : { ...tool.targetUI },
+      annotations: tool.annotations === void 0 ? void 0 : {
+        ...tool.annotations.readOnlyHint === void 0 ? {} : { readOnlyHint: tool.annotations.readOnlyHint },
+        ...tool.annotations.untrustedContentHint === void 0 ? {} : { untrustedContentHint: tool.annotations.untrustedContentHint }
+      },
       metadata: tool.metadata === void 0 ? void 0 : cloneJson(tool.metadata)
     };
     freezeJson(copy.inputSchema);
@@ -117,6 +135,7 @@ var AgentReadyWebMCP = (() => {
     Object.freeze(copy.risk);
     Object.freeze(copy.provenance);
     if (copy.targetUI !== void 0) Object.freeze(copy.targetUI);
+    if (copy.annotations !== void 0) Object.freeze(copy.annotations);
     if (copy.metadata !== void 0) freezeJson(copy.metadata);
     return Object.freeze(copy);
   }
@@ -1148,37 +1167,69 @@ var AgentReadyWebMCP = (() => {
     return typeof value === "object" && value !== null;
   }
   function isBridge(value) {
-    return isRecord(value) && typeof value.registerTool === "function" && typeof value.unregisterTool === "function";
+    return isRecord(value) && typeof value.registerTool === "function";
   }
   function getModelContext() {
     if (typeof globalThis === "undefined") return null;
     const browserDocument = "document" in globalThis ? globalThis.document : void 0;
     if (isRecord(browserDocument) && isBridge(browserDocument.modelContext)) return browserDocument.modelContext;
-    const browserNavigator = "navigator" in globalThis ? globalThis.navigator : void 0;
-    if (isRecord(browserNavigator) && isBridge(browserNavigator.modelContext)) return browserNavigator.modelContext;
     return null;
   }
-  function registrationHandle(name, value) {
-    if (typeof value === "string") return { name, registrationId: value };
-    if (isRecord(value) && typeof value.registrationId === "string") {
-      return { name, registrationId: value.registrationId };
-    }
-    return { name };
+  function isUntrustedOutput(tool) {
+    return tool.provenance.source === "discovery" || tool.provenance.source === "heuristic" || tool.provenance.source === "imported";
+  }
+  function nativeTool(tool) {
+    const title = tool.title ?? tool.targetUI?.label;
+    return {
+      name: tool.name,
+      ...title ? { title } : {},
+      description: tool.description,
+      inputSchema: tool.inputSchema,
+      execute: async (input) => {
+        if (!isRecord(input) || Array.isArray(input)) {
+          throw new TypeError("WebMCP tool input must be an object.");
+        }
+        return tool.handler(input);
+      },
+      annotations: {
+        readOnlyHint: tool.annotations?.readOnlyHint ?? tool.kind === "query",
+        untrustedContentHint: tool.annotations?.untrustedContentHint ?? isUntrustedOutput(tool)
+      }
+    };
   }
   var BrowserModelContextAdapter = class {
-    constructor(context = getModelContext()) {
+    constructor(context = getModelContext(), options = {}) {
       this.context = context;
+      this.options = options;
     }
     context;
+    options;
+    controllers = /* @__PURE__ */ new Map();
     isAvailable() {
       return isBridge(this.context);
     }
     registerTool(tool) {
       if (!isBridge(this.context)) throw new Error("Model context is unavailable.");
-      return registrationHandle(tool.name, this.context.registerTool(tool));
+      this.unregisterTool(tool.name);
+      const controller = new AbortController();
+      this.controllers.set(tool.name, controller);
+      const ready = Promise.resolve(
+        this.context.registerTool(nativeTool(tool), {
+          signal: controller.signal,
+          ...this.options.exposedTo === void 0 ? {} : { exposedTo: [...this.options.exposedTo] }
+        })
+      ).then(() => void 0).catch((error) => {
+        if (controller.signal.aborted) return;
+        if (this.controllers.get(tool.name) === controller) this.controllers.delete(tool.name);
+        throw error;
+      });
+      return { name: tool.name, ready };
     }
     unregisterTool(name) {
-      if (isBridge(this.context)) this.context.unregisterTool(name);
+      const controller = this.controllers.get(name);
+      if (!controller) return;
+      this.controllers.delete(name);
+      controller.abort();
     }
     async requestUserInteraction(request) {
       if (!isBridge(this.context) || typeof this.context.requestUserInteraction !== "function") {
@@ -1196,7 +1247,7 @@ var AgentReadyWebMCP = (() => {
       return true;
     }
     registerTool(tool) {
-      const handle = { name: tool.name, registrationId: `mock:${tool.name}` };
+      const handle = { name: tool.name };
       this.registrations.set(tool.name, handle);
       return handle;
     }
@@ -1539,7 +1590,7 @@ var AgentReadyWebMCP = (() => {
     const adapter = options.adapter ?? new BrowserModelContextAdapter();
     const registry = new CapabilityRegistry();
     const diagnostics = [];
-    const platformNames = /* @__PURE__ */ new Set();
+    const platformRegistrations = /* @__PURE__ */ new Map();
     const discoveredTools = /* @__PURE__ */ new Map();
     const policyConfig = {
       ...options.policy ?? options.policyConfig ?? {},
@@ -1608,7 +1659,7 @@ var AgentReadyWebMCP = (() => {
       handler: (input) => invokeThroughPolicy(tool, input)
     });
     const registerPlatform = (tool) => {
-      if (!running || platformNames.has(tool.name)) return;
+      if (!running || platformRegistrations.has(tool.name)) return;
       const evaluation = policyFor(tool);
       if (evaluation.decision === "deny") {
         addDiagnostic({ code: "tool-denied", message: "Tool was not registered because policy denied it.", toolName: tool.name, reasons: evaluation.reasons });
@@ -1618,18 +1669,26 @@ var AgentReadyWebMCP = (() => {
         addDiagnostic({ code: "platform-unavailable", message: "WebMCP platform is unavailable; tool remains available locally.", toolName: tool.name });
         return;
       }
+      const registration = Symbol(tool.name);
+      platformRegistrations.set(tool.name, registration);
       try {
-        adapter.registerTool(wrappedTool(tool));
-        platformNames.add(tool.name);
+        const result = adapter.registerTool(wrappedTool(tool));
+        if (!result.ready) return;
+        void Promise.resolve(result.ready).catch(() => {
+          if (platformRegistrations.get(tool.name) !== registration) return;
+          platformRegistrations.delete(tool.name);
+          addDiagnostic({ code: "platform-registration-failed", message: "Tool could not be registered on the platform.", toolName: tool.name });
+        });
       } catch {
+        platformRegistrations.delete(tool.name);
         addDiagnostic({ code: "platform-registration-failed", message: "Tool could not be registered on the platform.", toolName: tool.name });
       }
     };
     const unregisterPlatform = (name) => {
-      if (!platformNames.has(name)) return;
+      if (!platformRegistrations.has(name)) return;
       try {
         adapter.unregisterTool(name);
-        platformNames.delete(name);
+        platformRegistrations.delete(name);
       } catch {
         addDiagnostic({ code: "platform-unregistration-failed", message: "Tool could not be removed from the platform.", toolName: name });
       }
@@ -1637,7 +1696,7 @@ var AgentReadyWebMCP = (() => {
     registry.subscribe((event) => {
       if (!running) return;
       if (event.type === "clear") {
-        for (const name of [...platformNames]) unregisterPlatform(name);
+        for (const name of [...platformRegistrations.keys()]) unregisterPlatform(name);
         return;
       }
       if (!event.name) return;
@@ -1788,15 +1847,9 @@ var AgentReadyWebMCP = (() => {
         }
       },
       stop() {
+        if (!running && platformRegistrations.size === 0) return;
+        for (const name of [...platformRegistrations.keys()]) unregisterPlatform(name);
         if (!running) return;
-        for (const name of platformNames) {
-          try {
-            adapter.unregisterTool(name);
-          } catch {
-            addDiagnostic({ code: "platform-unregistration-failed", message: "Tool could not be removed from the platform.", toolName: name });
-          }
-        }
-        platformNames.clear();
         observer?.stop();
         for (const cleanup of invalidationCleanups.splice(0)) {
           try {

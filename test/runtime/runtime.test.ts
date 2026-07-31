@@ -22,15 +22,24 @@ class CaptureAdapter implements ModelContextAdapter {
   public readonly registrations: string[] = [];
   public readonly unregistrations: string[] = [];
   public available = true;
+  public rejectRegistration = false;
+  public unregistrationFailures = 0;
   public result: UserInteractionResult = { confirmed: true };
   isAvailable(): boolean { return this.available; }
-  registerTool(value: RuntimeTool): { name: string } {
+  registerTool(value: RuntimeTool): { name: string; ready?: PromiseLike<void> } {
+    if (this.rejectRegistration) {
+      return { name: value.name, ready: Promise.reject(new Error('registration rejected')) };
+    }
     this.registrations.push(value.name);
     this.tools.set(value.name, value);
     return { name: value.name };
   }
   unregisterTool(name: string): void {
     this.unregistrations.push(name);
+    if (this.unregistrationFailures > 0) {
+      this.unregistrationFailures -= 1;
+      throw new Error('unregistration failed');
+    }
     this.tools.delete(name);
   }
   async requestUserInteraction(request: UserInteractionRequest): Promise<UserInteractionResult> { this.interactions.push(request); return this.result; }
@@ -71,6 +80,20 @@ describe('createWebMCPRuntime', () => {
     runtime.start();
     expect(runtime.listTools().map((item) => item.name)).toContain('save');
     expect(runtime.diagnostics.some((item) => item.code === 'platform-unavailable')).toBe(true);
+  });
+
+  it('reports asynchronous platform registration failures without retaining stale state', async () => {
+    const adapter = new CaptureAdapter();
+    adapter.rejectRegistration = true;
+    const runtime = createWebMCPRuntime({ adapter, initialTools: [tool('async.failure')] });
+    runtime.start();
+    await vi.waitFor(() => {
+      expect(runtime.diagnostics).toContainEqual(expect.objectContaining({
+        code: 'platform-registration-failed',
+        toolName: 'async.failure',
+      }));
+    });
+    runtime.stop();
   });
 
   it('keeps explicit tools ahead of discovery with the same name', () => {
@@ -126,6 +149,26 @@ describe('createWebMCPRuntime', () => {
     expect(adapter.tools.size).toBe(0);
     expect(runtime.listTools()).toHaveLength(0);
     expect(runtime.isRunning()).toBe(false);
+  });
+
+  it('retains failed removals so a later stop can retry them', () => {
+    const adapter = new CaptureAdapter();
+    adapter.unregistrationFailures = 1;
+    const runtime = createWebMCPRuntime({
+      mode: 'explicit',
+      adapter,
+      initialTools: [tool('retry.removal')],
+    });
+    runtime.start();
+    runtime.stop();
+    expect(adapter.tools.has('retry.removal')).toBe(true);
+    expect(runtime.diagnostics).toContainEqual(expect.objectContaining({
+      code: 'platform-unregistration-failed',
+      toolName: 'retry.removal',
+    }));
+    runtime.stop();
+    expect(adapter.tools.has('retry.removal')).toBe(false);
+    expect(adapter.unregistrations).toEqual(['retry.removal', 'retry.removal']);
   });
 
   it('resynchronizes dynamically added and removed discovery tools', async () => {

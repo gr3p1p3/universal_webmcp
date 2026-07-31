@@ -1,6 +1,6 @@
 {
   "name": "@gr3p/universal-webmcp",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "A local, progressive-enhancement runtime for exposing existing web UIs to WebMCP-capable agents.",
   "type": "module",
   "license": "MIT",

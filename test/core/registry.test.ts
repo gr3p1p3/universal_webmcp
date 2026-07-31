@@ -72,8 +72,14 @@ describe('CapabilityRegistry', () => {
     const registry = new CapabilityRegistry();
     expect(() => registry.register(tool(''))).toThrow(CapabilityValidationError);
     expect(() => registry.register(tool('not stable name'))).toThrow(CapabilityValidationError);
+    expect(() => registry.register(tool('x'.repeat(129)))).toThrow(CapabilityValidationError);
+    expect(registry.register(tool('1.valid-name')).name).toBe('1.valid-name');
     expect(() => registry.register({ ...tool(), description: ' ' })).toThrow(CapabilityValidationError);
     expect(() => registry.register({ ...tool(), inputSchema: [] as unknown as RuntimeTool['inputSchema'] })).toThrow(CapabilityValidationError);
     expect(() => registry.register({ ...tool(), provenance: { source: 'explicit', confidence: 2 } })).toThrow(CapabilityValidationError);
+    expect(() => registry.register({
+      ...tool(),
+      annotations: { readOnlyHint: 'false' } as unknown as RuntimeTool['annotations'],
+    })).toThrow(CapabilityValidationError);
   });
 });

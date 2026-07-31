@@ -160,7 +160,7 @@ export function createWebMCPRuntime(options: WebMCPRuntimeOptions = {}): WebMCPR
   const adapter = options.adapter ?? new BrowserModelContextAdapter();
   const registry = new CapabilityRegistry();
   const diagnostics: RuntimeDiagnostic[] = [];
-  const platformNames = new Set<string>();
+  const platformRegistrations = new Map<string, symbol>();
   const discoveredTools = new Map<string, string>();
   const policyConfig: RiskPolicyConfig = {
     ...(options.policy ?? options.policyConfig ?? {}),
@@ -233,7 +233,7 @@ export function createWebMCPRuntime(options: WebMCPRuntimeOptions = {}): WebMCPR
   });
 
   const registerPlatform = (tool: RuntimeTool): void => {
-    if (!running || platformNames.has(tool.name)) return;
+    if (!running || platformRegistrations.has(tool.name)) return;
     const evaluation = policyFor(tool);
     if (evaluation.decision === 'deny') {
       addDiagnostic({ code: 'tool-denied', message: 'Tool was not registered because policy denied it.', toolName: tool.name, reasons: evaluation.reasons });
@@ -243,19 +243,27 @@ export function createWebMCPRuntime(options: WebMCPRuntimeOptions = {}): WebMCPR
       addDiagnostic({ code: 'platform-unavailable', message: 'WebMCP platform is unavailable; tool remains available locally.', toolName: tool.name });
       return;
     }
+    const registration = Symbol(tool.name);
+    platformRegistrations.set(tool.name, registration);
     try {
-      adapter.registerTool(wrappedTool(tool));
-      platformNames.add(tool.name);
+      const result = adapter.registerTool(wrappedTool(tool));
+      if (!result.ready) return;
+      void Promise.resolve(result.ready).catch(() => {
+        if (platformRegistrations.get(tool.name) !== registration) return;
+        platformRegistrations.delete(tool.name);
+        addDiagnostic({ code: 'platform-registration-failed', message: 'Tool could not be registered on the platform.', toolName: tool.name });
+      });
     } catch {
+      platformRegistrations.delete(tool.name);
       addDiagnostic({ code: 'platform-registration-failed', message: 'Tool could not be registered on the platform.', toolName: tool.name });
     }
   };
 
   const unregisterPlatform = (name: string): void => {
-    if (!platformNames.has(name)) return;
+    if (!platformRegistrations.has(name)) return;
     try {
       adapter.unregisterTool(name);
-      platformNames.delete(name);
+      platformRegistrations.delete(name);
     } catch {
       addDiagnostic({ code: 'platform-unregistration-failed', message: 'Tool could not be removed from the platform.', toolName: name });
     }
@@ -266,7 +274,7 @@ export function createWebMCPRuntime(options: WebMCPRuntimeOptions = {}): WebMCPR
   registry.subscribe((event) => {
     if (!running) return;
     if (event.type === 'clear') {
-      for (const name of [...platformNames]) unregisterPlatform(name);
+      for (const name of [...platformRegistrations.keys()]) unregisterPlatform(name);
       return;
     }
     if (!event.name) return;
@@ -415,11 +423,9 @@ export function createWebMCPRuntime(options: WebMCPRuntimeOptions = {}): WebMCPR
       }
     },
     stop(): void {
+      if (!running && platformRegistrations.size === 0) return;
+      for (const name of [...platformRegistrations.keys()]) unregisterPlatform(name);
       if (!running) return;
-      for (const name of platformNames) {
-        try { adapter.unregisterTool(name); } catch { addDiagnostic({ code: 'platform-unregistration-failed', message: 'Tool could not be removed from the platform.', toolName: name }); }
-      }
-      platformNames.clear();
       observer?.stop();
       for (const cleanup of invalidationCleanups.splice(0)) {
         try { cleanup(); } catch {

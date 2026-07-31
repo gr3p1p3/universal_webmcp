@@ -10,6 +10,7 @@ import type {
   JsonValue,
   RuntimeTool,
   TargetUI,
+  ToolAnnotations,
 } from './model.js';
 
 export type RegistryChangeType = 'register' | 'replace' | 'unregister' | 'clear';
@@ -22,7 +23,7 @@ export interface RegistryChangeEvent {
 
 export type RegistryListener = (event: RegistryChangeEvent) => void;
 
-const namePattern = /^[A-Za-z][A-Za-z0-9._-]*$/;
+const namePattern = /^[A-Za-z0-9._-]{1,128}$/;
 
 function isJsonObject(value: JsonValue | object): value is JsonObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -46,8 +47,11 @@ function freezeJson(value: JsonValue): JsonValue {
 function validateTool(tool: RuntimeTool): void {
   if (!tool.name.trim() || !namePattern.test(tool.name)) {
     throw new CapabilityValidationError(
-      'Capability name must be a non-empty stable identifier (letters, digits, ., _, -).',
+      'Capability name must be 1-128 ASCII letters, digits, ., _, or -.',
     );
+  }
+  if (tool.title !== undefined && typeof tool.title !== 'string') {
+    throw new CapabilityValidationError('Capability title must be a string when provided.');
   }
   if (!tool.description.trim()) throw new CapabilityValidationError('Capability description cannot be empty.');
   if (!isJsonObject(tool.inputSchema)) throw new CapabilityValidationError('Capability inputSchema must be an object.');
@@ -56,6 +60,17 @@ function validateTool(tool: RuntimeTool): void {
   }
   if (!Number.isFinite(tool.provenance.confidence) || tool.provenance.confidence < 0 || tool.provenance.confidence > 1) {
     throw new CapabilityValidationError('Capability confidence must be a number between 0 and 1.');
+  }
+  if (tool.annotations !== undefined) {
+    if (!isJsonObject(tool.annotations)) {
+      throw new CapabilityValidationError('Capability annotations must be an object when provided.');
+    }
+    if (tool.annotations.readOnlyHint !== undefined && typeof tool.annotations.readOnlyHint !== 'boolean') {
+      throw new CapabilityValidationError('Capability readOnlyHint must be a boolean when provided.');
+    }
+    if (tool.annotations.untrustedContentHint !== undefined && typeof tool.annotations.untrustedContentHint !== 'boolean') {
+      throw new CapabilityValidationError('Capability untrustedContentHint must be a boolean when provided.');
+    }
   }
 }
 
@@ -67,6 +82,12 @@ function copyTool(tool: RuntimeTool): RuntimeTool {
     risk: { ...tool.risk } as CapabilityRisk,
     provenance: { ...tool.provenance } as CapabilityProvenance,
     targetUI: tool.targetUI === undefined ? undefined : { ...tool.targetUI } as TargetUI,
+    annotations: tool.annotations === undefined ? undefined : {
+      ...(tool.annotations.readOnlyHint === undefined ? {} : { readOnlyHint: tool.annotations.readOnlyHint }),
+      ...(tool.annotations.untrustedContentHint === undefined
+        ? {}
+        : { untrustedContentHint: tool.annotations.untrustedContentHint }),
+    } as ToolAnnotations,
     metadata: tool.metadata === undefined ? undefined : cloneJson(tool.metadata) as JsonObject,
   };
   freezeJson(copy.inputSchema);
@@ -74,6 +95,7 @@ function copyTool(tool: RuntimeTool): RuntimeTool {
   Object.freeze(copy.risk);
   Object.freeze(copy.provenance);
   if (copy.targetUI !== undefined) Object.freeze(copy.targetUI);
+  if (copy.annotations !== undefined) Object.freeze(copy.annotations);
   if (copy.metadata !== undefined) freezeJson(copy.metadata);
   return Object.freeze(copy);
 }
