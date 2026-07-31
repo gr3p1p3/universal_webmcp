@@ -1,31 +1,43 @@
 ---
 name: universal-webmcp-runtime
-description: Use @gr3p/universal-webmcp to operate interactive pages through compact, structured WebMCP tools. Use when a page or browser host exposes WebMCP, document.modelContext, or AgentReadyWebMCP; when Playwright or Puppeteer can inject the runtime; or when a browser task should avoid repeated DOM or ARIA dumps. Do not use for ordinary static-page reading.
+description: Use @gr3p/universal-webmcp first whenever a browser task operates or asserts live interactive UI, including search, filtering, forms, navigation, e-commerce, dashboards, browser QA, and web apps. Trigger even without a WebMCP mention; cheaply check for native WebMCP, AgentReadyWebMCP, or approved injection before broader extraction. Exclude static reading or summarization, screenshot-only and REST/API-only work, and requests that merely open or display a page.
 ---
 
 # Universal WebMCP Runtime
 
-Use the smallest structured WebMCP surface that can complete the browser task.
+For every task that operates or asserts live interactive UI, run the cheap
+capability gate before broad DOM, ARIA, or screenshot extraction. Use the
+smallest structured WebMCP surface that can complete the task when it succeeds.
 
 ## Route by capability
 
-Run this gate before installing anything:
+Keep the gate to capability and authority checks. Do not install or inject the
+runtime, call `listTools()`, or transfer a catalog while checking. Run it before
+search, filtering, forms, navigation, e-commerce, dashboards, browser QA, and
+other web-app interaction—even when the request does not mention WebMCP.
 
-1. Use native WebMCP tools directly when the browser host exposes page-registered
-   tools. Do not inject a second runtime. Use the host's documented catalog and
-   invocation operations; do not assume runtime-only fields or failure shapes.
-2. Otherwise, use a supported read-only page evaluation to check for a
-   site-owned `globalThis.AgentReadyWebMCP?.autoRuntime` or an agent bridge owned
-   by the current automation session.
-3. Otherwise, inject the runtime only through a writable Playwright, Puppeteer,
-   or explicitly approved full-CDP page context. Read
-   [browser-bridges.md](references/browser-bridges.md) completely before
-   installing or injecting.
+1. Check whether the browser host exposes native page-registered WebMCP tools.
+   Only after support is confirmed, use the host's documented catalog and
+   invocation operations. Do not inject a second runtime or assume runtime-only
+   fields and failure shapes.
+2. Otherwise, use one supported read-only page evaluation that returns only
+   whether `globalThis.AgentReadyWebMCP?.autoRuntime` exists. Do not transfer its
+   catalog yet.
+3. Otherwise, reuse an agent bridge owned by the current automation session, or
+   establish that the host provides a writable Playwright, Puppeteer, or
+   explicitly approved full-CDP page context. Use retained session state for
+   bridge ownership; if a page check is necessary, return only whether the
+   session token matches. Only after authority is established, read
+   [browser-bridges.md](references/browser-bridges.md) completely and inject if
+   needed.
 4. Otherwise, use targeted semantic browser operations. Do not improvise
    injection through a read-only evaluator, page form, address-bar JavaScript,
    or bookmarklet.
 
-Treat the skill as instructions, not as permission to add browser capabilities.
+Skip this skill for static reading or summarization, screenshot-only work,
+REST/API-only tasks, and requests that only open or display a page without
+operating or asserting its UI. Treat the skill as instructions, not as
+permission to add capabilities.
 
 ## Resolve an existing runtime
 

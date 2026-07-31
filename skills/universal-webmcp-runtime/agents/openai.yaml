@@ -1,7 +1,7 @@
 interface:
   display_name: "Universal WebMCP Runtime"
-  short_description: "Use compact WebMCP tools for browser tasks"
-  default_prompt: "Use $universal-webmcp-runtime to inspect available WebMCP capabilities and complete this browser task with the smallest structured result."
+  short_description: "Route interactive browser tasks through WebMCP"
+  default_prompt: "Use $universal-webmcp-runtime to run a cheap WebMCP capability gate, then complete this interactive browser task through compact tools when available."
 
 policy:
   allow_implicit_invocation: true
