@@ -455,6 +455,7 @@ export function createRepeatedListTool(context: RepeatedListContext): RuntimeToo
         },
       },
     },
+    annotations: { readOnlyHint: true },
     risk: { level: 'low' },
     provenance: { source: 'discovery', confidence: structured ? 0.8 : 0.85 },
     targetUI: { selector: context.selector, label: context.label },

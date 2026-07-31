@@ -56,6 +56,20 @@ describe('DOM actions', () => {
     expect(submitted).toHaveBeenCalledOnce();
   });
 
+  it('selects the unique submitter by form ownership, including external controls', () => {
+    document.body.innerHTML = `
+      <form id="primary"><button form="other">Wrong owner</button></form>
+      <form id="other"></form>
+      <button id="external" type="submit" form="primary">External submit</button>`;
+    let submitter: HTMLElement | null = null;
+    document.querySelector('#primary')?.addEventListener('submit', (event) => {
+      event.preventDefault();
+      submitter = (event as SubmitEvent).submitter;
+    });
+    expect(executeDomAction(document, '#primary', 'submit')).toMatchObject({ status: 'ok' });
+    expect(submitter).toBe(document.querySelector('#external'));
+  });
+
   it('toggles native and ARIA controls through a boolean contract', () => {
     document.body.innerHTML = `
       <input id="remember" type="checkbox">

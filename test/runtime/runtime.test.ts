@@ -190,12 +190,13 @@ describe('createWebMCPRuntime', () => {
     document.body.innerHTML = '<button id="dynamic-label">Before</button>';
     const runtime = createWebMCPRuntime({ observerOptions: { debounceMs: 0 } });
     runtime.start();
-    expect(runtime.listTools().map((item) => item.name)).toContain('click.before');
+    expect(runtime.listTools().map((item) => item.name)).toContain('click.dynamic-label');
     document.querySelector('#dynamic-label')!.textContent = 'After';
-    await vi.waitFor(() => expect(runtime.listTools().map((item) => item.name)).toContain('click.after'));
-    expect(runtime.listTools().map((item) => item.name)).not.toContain('click.before');
+    await vi.waitFor(() => expect(
+      runtime.listTools().find((item) => item.name === 'click.dynamic-label')?.targetUI?.label,
+    ).toBe('After'));
     document.querySelector('#dynamic-label')?.setAttribute('style', 'display: none');
-    await vi.waitFor(() => expect(runtime.listTools().map((item) => item.name)).not.toContain('click.after'));
+    await vi.waitFor(() => expect(runtime.listTools().map((item) => item.name)).not.toContain('click.dynamic-label'));
     runtime.stop();
   });
 
@@ -210,6 +211,21 @@ describe('createWebMCPRuntime', () => {
     expect(refreshed.map((item) => item.name)).not.toContain('old');
     await expect(runtime.waitForTool('new', { timeoutMs: 20 })).resolves.toMatchObject({ name: 'new' });
     await expect(runtime.waitForTool('missing', { timeoutMs: 20 })).resolves.toBeUndefined();
+    runtime.stop();
+  });
+
+  it('exposes the latest semantic catalog decision graph', () => {
+    document.body.innerHTML = `
+      <form id="lookup"><input name="query"><button type="submit">Go</button></form>`;
+    const runtime = createWebMCPRuntime({ observe: false });
+    expect(runtime.getSemanticGraph()).toBeUndefined();
+    runtime.start();
+    expect(runtime.getSemanticGraph()).toMatchObject({
+      selectedToolNames: ['submit.lookup', 'click.go'],
+    });
+    expect(runtime.getSemanticGraph()?.nodes.some(
+      (node) => node.exclusionReason === 'dominated',
+    )).toBe(true);
     runtime.stop();
   });
 

@@ -1,7 +1,11 @@
 import { CapabilityRegistry } from '../core/registry.js';
 import { RuntimeDestroyedError } from '../core/errors.js';
 import type { JsonObject, JsonValue, RuntimeMode, RuntimeTool, RuntimeToolDescriptor, RuntimeToolHandler } from '../core/model.js';
-import { discoverUI, type DiscoveryOptions } from '../discovery/index.js';
+import {
+  discoverSemanticUI,
+  type DiscoveryOptions,
+  type SemanticUIGraph,
+} from '../discovery/index.js';
 import {
   evaluateToolPolicy,
   type ConfirmationPolicy,
@@ -99,6 +103,8 @@ export interface WebMCPRuntime {
   waitForTool(name: string, options?: RuntimeWaitOptions): Promise<RuntimeToolDescriptor | undefined>;
   /** Returns metadata only; handlers are intentionally not exposed. */
   listTools(): readonly RuntimeToolDescriptor[];
+  /** Returns the latest automatic discovery graph, including excluded candidates. */
+  getSemanticGraph(): SemanticUIGraph | undefined;
   /** Invokes a registered tool through the same policy guardrail used by the platform. */
   invokeTool(name: string, input: JsonObject): Promise<JsonValue>;
   getPolicyDecision(tool: RuntimeTool | string): PolicyEvaluation | undefined;
@@ -185,6 +191,7 @@ export function createWebMCPRuntime(options: WebMCPRuntimeOptions = {}): WebMCPR
   let syncRevision = 0;
   let lastInvalidation = Date.now();
   let invalidationCleanups: (() => void)[] = [];
+  let semanticGraph: SemanticUIGraph | undefined;
 
   const addDiagnostic = (diagnostic: RuntimeDiagnostic): void => { diagnostics.push(diagnostic); };
 
@@ -300,7 +307,11 @@ export function createWebMCPRuntime(options: WebMCPRuntimeOptions = {}): WebMCPR
   const reconcileDiscovery = (): void => {
     if (destroyed || (mode !== 'auto' && mode !== 'hybrid') || !root) return;
     let tools: readonly RuntimeTool[];
-    try { tools = discoverUI(root, discoveryOptions); } catch {
+    try {
+      const compilation = discoverSemanticUI(root, discoveryOptions);
+      tools = compilation.tools;
+      semanticGraph = compilation.graph;
+    } catch {
       addDiagnostic({ code: 'discovery-failed', message: 'UI discovery failed.' });
       return;
     }
@@ -381,7 +392,11 @@ export function createWebMCPRuntime(options: WebMCPRuntimeOptions = {}): WebMCPR
   const discover = (): readonly RuntimeTool[] => {
     if (destroyed || (mode !== 'auto' && mode !== 'hybrid') || !root) return Object.freeze([]);
     let tools: readonly RuntimeTool[];
-    try { tools = discoverUI(root, discoveryOptions); } catch {
+    try {
+      const compilation = discoverSemanticUI(root, discoveryOptions);
+      tools = compilation.tools;
+      semanticGraph = compilation.graph;
+    } catch {
       addDiagnostic({ code: 'discovery-failed', message: 'UI discovery failed.' });
       return Object.freeze([]);
     }
@@ -492,6 +507,7 @@ export function createWebMCPRuntime(options: WebMCPRuntimeOptions = {}): WebMCPR
       throw new RuntimeDestroyedError();
     },
     listTools: (): readonly RuntimeToolDescriptor[] => Object.freeze(registry.list().map(descriptorOf)),
+    getSemanticGraph: (): SemanticUIGraph | undefined => semanticGraph,
     invokeTool(name: string, input: JsonObject): Promise<JsonValue> {
       if (destroyed) throw new RuntimeDestroyedError();
       const tool = registry.get(name);

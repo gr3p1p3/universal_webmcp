@@ -4,7 +4,7 @@
 
 Universal WebMCP Runtime turns an existing web UI into a compact, inspectable tool surface. Instead of repeatedly serializing page HTML or accessibility trees, an agent can select one capability descriptor, invoke it with structured input, and receive structured JSON from the visible UI.
 
-In the current benchmark, the selected-tool path used 28.2%–87.4% fewer tokens than targeted ARIA snapshots and 68.7%–99.5% fewer than relevant HTML. The [measured results](#measured-token-footprint) also document the important counterexample: an unfiltered cold catalog can be larger than ARIA, so selection and caching are part of the operating model—not optional optimizations.
+In the current benchmark, the selected-tool path used 27.2%–86.9% fewer tokens than targeted ARIA snapshots and 68.3%–99.5% fewer than relevant HTML. The [measured results](#measured-token-footprint) also document the important counterexample: an unfiltered cold catalog can be larger than ARIA, so selection and caching are part of the operating model—not optional optimizations.
 
 [`@gr3p/universal-webmcp`](https://www.npmjs.com/package/@gr3p/universal-webmcp) addresses both sides of a browser-agent integration:
 
@@ -40,19 +40,19 @@ Typical use cases include e-commerce catalogs, search and filtering, dashboards,
 
 The repository benchmark collects the same complete repeated-record set through five representations and tokenizes each payload with `o200k_base`. WebMCP objects use minified JSON; task prompts and model responses are excluded equally from every path.
 
-Results measured on 2026-07-30:
+Results measured on 2026-07-31:
 
 | Complete collection payload | Controlled fixture, 24/24 records | Public live page, 25/25 records |
 |---|---:|---:|
-| Relevant region HTML | 6,662 | 244,759 |
-| Relevant region ARIA snapshot | 2,901 | 10,342 |
+| Relevant region HTML | 6,662 | 245,375 |
+| Relevant region ARIA snapshot | 2,901 | 10,187 |
 | WebMCP result with cached catalog | 1,829 | 1,041 |
-| Selected tool descriptor + input + result | 2,084 | 1,302 |
-| Full catalog + input + result | 3,276 | 15,230 |
+| Selected tool descriptor + input + result | 2,113 | 1,332 |
+| Full catalog + input + result | 3,879 | 17,034 |
 
-For the selected-tool path, that is 68.7% fewer tokens than HTML and 28.2% fewer than ARIA in the controlled fixture; on the live page it is 99.5% fewer than HTML and 87.4% fewer than ARIA.
+For the selected-tool path, that is 68.3% fewer tokens than HTML and 27.2% fewer than ARIA in the controlled fixture; on the live page it is 99.5% fewer than HTML and 86.9% fewer than ARIA.
 
-This is not a blanket first-turn claim. The complete cold catalog was 12.9% larger than targeted ARIA in the fixture and 47.3% larger on the live page. The measured advantage depends on selecting the relevant descriptor or caching the catalog; cumulative WebMCP usage became smaller than repeated ARIA snapshots at the second task in both runs.
+This is not a blanket first-turn claim. The richer complete catalog, including deterministic identities and compiled input schemas, was 33.7% larger than targeted ARIA in the fixture and 67.2% larger on the live page. The measured advantage depends on selecting the relevant descriptor or caching the catalog; cumulative WebMCP usage became smaller than repeated ARIA snapshots at the second task in both runs.
 
 Reproduce the controlled benchmark locally, or run the explicitly separate live variant:
 
@@ -104,7 +104,7 @@ For a version-pinned URL backed by the npm release, use jsDelivr:
 
 ```html
 <script
-  src="https://cdn.jsdelivr.net/npm/@gr3p/universal-webmcp@0.1.3/dist/browser.iife.js"
+  src="https://cdn.jsdelivr.net/npm/@gr3p/universal-webmcp@0.2.0/dist/browser.iife.js"
   data-webmcp-auto
 ></script>
 ```
@@ -126,6 +126,64 @@ The GitHub Pages URL follows the current `main` build. Prefer the version-pinned
 | Action | Click, select, toggle, navigate, or operate a repeated item | Discovery or explicit mapping |
 | Native tool registration | Share approved tools with a browser model-context implementation | Optional adapter |
 | Synchronization | Wait for a tool or for the UI to become idle | `refresh()`, `waitForTool()`, `waitForIdle()` |
+
+## Deterministic semantic compilation
+
+Automatic discovery is compiled before registration:
+
+```text
+rendered DOM → Semantic UI Graph → ranked capabilities → compact WebMCP catalog
+```
+
+The compiler applies the same precedence on every scan:
+
+1. explicit WebMCP metadata;
+2. complete semantic forms;
+3. repeated structures and grouped item actions;
+4. ARIA and native HTML controls;
+5. conservative text heuristics.
+
+A complete form dominates only text fields it can address unambiguously.
+Submitters remain visible as separate tools, and a form with one submitter
+activates that control so click handlers and submit intent are preserved.
+Ambiguous fields and multiple submit actions remain separate tools. Repeated actions are grouped, declared
+equivalents are deduplicated, and only the highest-ranked automatic candidates
+enter the catalog. Explicit application contracts are never removed by the
+catalog budget.
+
+Distinct controls are never merged merely because their labels match. A site
+can deliberately collapse interchangeable controls by assigning the same
+`data-webmcp-equivalent` value within one semantic scope.
+
+Names prefer stable application anchors such as `data-webmcp-tool`, `id`, and
+unique form-control `name`. Each descriptor also carries a
+`metadata.semanticId`; positional selectors are used only as the identity
+fallback when the page supplies no stable anchor. HTML constraints are compiled
+into JSON Schema, including supplied-field constraints, compatible formats,
+length/pattern constraints, select enums, and `toolparamdescription`.
+
+```ts
+const runtime = createWebMCPRuntime({
+  discovery: {
+    catalog: {
+      maxTools: 32,
+      minimumConfidence: 0.85,
+      dominance: true,
+    },
+  },
+});
+
+runtime.start();
+
+const graph = runtime.getSemanticGraph();
+const excluded = graph?.nodes.filter((node) => !node.selected);
+```
+
+`getSemanticGraph()` exposes the latest decision graph without handlers or DOM
+nodes. Excluded candidates report `dominated`, `equivalent`,
+`below-confidence`, or `catalog-budget`, making automatic registration
+inspectable rather than opaque. `analyzeUI(root, options)` provides the same
+read-only report without starting a runtime.
 
 Native registration follows the current WebMCP draft: tools are registered with
 `document.modelContext.registerTool()`, internal handlers are exposed as

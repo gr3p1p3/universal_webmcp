@@ -31,6 +31,7 @@ var AgentReadyWebMCP = (() => {
     RiskPolicy: () => RiskPolicy,
     RuntimeDestroyedError: () => RuntimeDestroyedError,
     RuntimeObserver: () => RuntimeObserver,
+    analyzeUI: () => analyzeUI,
     autoRuntime: () => autoRuntime,
     createEventInvalidationSource: () => createEventInvalidationSource,
     createManualMappingTool: () => createManualMappingTool,
@@ -313,6 +314,19 @@ var AgentReadyWebMCP = (() => {
     }
     return { fields: count, skipped };
   }
+  function enabledSubmitters(form) {
+    const formControls = Array.from(form.elements).filter((control) => {
+      if (!("tagName" in control) || control.nodeType !== 1) return false;
+      const element = control;
+      const tag = element.tagName.toLowerCase();
+      return element.form === form && (tag === "button" && !["button", "reset"].includes(element.type) || tag === "input" && ["submit", "image"].includes(element.type));
+    });
+    const root = form.getRootNode();
+    const imageControls = Array.from(
+      root.querySelectorAll('input[type="image"]')
+    ).filter((control) => control.form === form);
+    return [.../* @__PURE__ */ new Set([...formControls, ...imageControls])].filter((control) => !isDisabledTarget(control));
+  }
   function executeElementAction(target, selector, action, input = {}, options = {}) {
     if (isDisabledTarget(target, options)) return { status: "error", action, selector, error: "target-disabled" };
     try {
@@ -400,8 +414,11 @@ var AgentReadyWebMCP = (() => {
           const form = isTag(target, "form") ? target : target.closest("form");
           if (!form) return { status: "error", action, selector, error: "form-not-found" };
           const filled = fillForm(form, input, options);
-          if (typeof form.requestSubmit === "function") form.requestSubmit();
-          else form.dispatchEvent(new SubmitEvent("submit", { bubbles: true, cancelable: true }));
+          if (typeof form.requestSubmit === "function") {
+            const submitters = enabledSubmitters(form);
+            if (submitters.length === 1) submitters[0].click();
+            else form.requestSubmit();
+          } else form.dispatchEvent(new SubmitEvent("submit", { bubbles: true, cancelable: true }));
           return { status: "ok", action, selector, result: { ...filled, submitted: true } };
         }
       }
@@ -744,6 +761,7 @@ var AgentReadyWebMCP = (() => {
           }
         }
       },
+      annotations: { readOnlyHint: true },
       risk: { level: "low" },
       provenance: { source: "discovery", confidence: structured ? 0.8 : 0.85 },
       targetUI: { selector: context.selector, label: context.label },
@@ -842,6 +860,135 @@ var AgentReadyWebMCP = (() => {
     return { tools: Object.freeze(tools), controls: represented };
   }
 
+  // src/discovery/semantic-graph.ts
+  function validateOptions(options) {
+    const maxTools = options.maxTools ?? 64;
+    const minimumConfidence = options.minimumConfidence ?? 0.8;
+    if (!Number.isInteger(maxTools) || maxTools < 1) {
+      throw new RangeError("catalog.maxTools must be a positive integer.");
+    }
+    if (!Number.isFinite(minimumConfidence) || minimumConfidence < 0 || minimumConfidence > 1) {
+      throw new RangeError("catalog.minimumConfidence must be between 0 and 1.");
+    }
+    return { maxTools, minimumConfidence, dominance: options.dominance !== false };
+  }
+  function rank(left, right) {
+    return right.priority - left.priority || right.tool.provenance.confidence - left.tool.provenance.confidence || left.id.localeCompare(right.id) || left.tool.name.localeCompare(right.tool.name);
+  }
+  function ownerForm(candidate) {
+    if (candidate.element.tagName.toLowerCase() === "form") return candidate.element;
+    if ("form" in candidate.element) {
+      const form = candidate.element.form;
+      if (form) return form;
+    }
+    return candidate.element.closest("form");
+  }
+  function isFormMemberDominated(owner, member) {
+    if (owner === member || member.explicit || owner.tool.kind !== "form") return false;
+    if (owner.element.tagName.toLowerCase() !== "form") return false;
+    if (owner.action !== "submit") return false;
+    if (isEffectivelyDisabled(owner.element)) return false;
+    const form = ownerForm(owner);
+    if (!form || ownerForm(member) !== form) return false;
+    const formSubmitters = Array.from(form.elements).filter((control) => typeof control.getAttribute === "function").filter((control) => {
+      const tag2 = control.tagName.toLowerCase();
+      const type2 = (control.type || "").toLowerCase();
+      return control.form === form && !isEffectivelyDisabled(control) && (tag2 === "button" && !["button", "reset"].includes(type2) || tag2 === "input" && ["submit", "image"].includes(type2));
+    });
+    const root = form.getRootNode();
+    const imageSubmitters = Array.from(
+      root.querySelectorAll('input[type="image"]')
+    ).filter((control) => control.form === form && !isEffectivelyDisabled(control));
+    const submitters = [.../* @__PURE__ */ new Set([...formSubmitters, ...imageSubmitters])];
+    const tag = member.element.tagName.toLowerCase();
+    const type = (member.element.getAttribute("type") || "text").toLowerCase();
+    const fieldName = member.element.getAttribute("name") || "";
+    const sameNamedControls = fieldName ? Array.from(form.elements).filter((control) => typeof control.getAttribute === "function" && control.getAttribute("name") === fieldName).length : 0;
+    const representedTextControl = member.action === "fill" && submitters.length <= 1 && !!fieldName && sameNamedControls === 1 && (tag === "textarea" || tag === "input" && ![
+      "button",
+      "submit",
+      "reset",
+      "image",
+      "hidden",
+      "password",
+      "file",
+      "checkbox",
+      "radio"
+    ].includes(type));
+    return representedTextControl;
+  }
+  function compileSemanticCandidates(candidates, options = {}) {
+    const config = validateOptions(options);
+    const exclusions = /* @__PURE__ */ new Map();
+    const edges = [];
+    const ranked = [...candidates].sort(rank);
+    if (config.dominance) {
+      const owners = ranked.filter((candidate) => candidate.tool.kind === "form");
+      for (const owner of owners) {
+        for (const member of candidates) {
+          if (!isFormMemberDominated(owner, member)) continue;
+          exclusions.set(member.id, "dominated");
+          edges.push({ from: owner.id, to: member.id, relation: "dominates" });
+          edges.push({ from: owner.id, to: member.id, relation: "owns" });
+        }
+      }
+    }
+    const representatives = /* @__PURE__ */ new Map();
+    for (const candidate of ranked) {
+      if (exclusions.has(candidate.id)) continue;
+      const representative = representatives.get(candidate.capabilityKey);
+      if (!representative) {
+        representatives.set(candidate.capabilityKey, candidate);
+        continue;
+      }
+      const declaredEquivalent = candidate.capabilityKey.startsWith("equivalent|");
+      if (declaredEquivalent || !candidate.explicit) {
+        exclusions.set(candidate.id, "equivalent");
+        edges.push({ from: representative.id, to: candidate.id, relation: "equivalent" });
+        continue;
+      }
+      representatives.set(candidate.capabilityKey, candidate);
+    }
+    for (const candidate of candidates) {
+      if (candidate.explicit || exclusions.has(candidate.id)) continue;
+      if (candidate.tool.provenance.confidence < config.minimumConfidence) {
+        exclusions.set(candidate.id, "below-confidence");
+      }
+    }
+    const automatic = ranked.filter((candidate) => !candidate.explicit && !exclusions.has(candidate.id));
+    for (const candidate of automatic.slice(config.maxTools)) {
+      exclusions.set(candidate.id, "catalog-budget");
+    }
+    const selectedIds = new Set(
+      candidates.filter((candidate) => !exclusions.has(candidate.id)).map((candidate) => candidate.id)
+    );
+    const tools = candidates.filter((candidate) => selectedIds.has(candidate.id)).map((candidate) => candidate.tool);
+    const nodes = candidates.map((candidate) => {
+      const exclusionReason = exclusions.get(candidate.id);
+      return Object.freeze({
+        id: candidate.id,
+        name: candidate.tool.name,
+        label: candidate.tool.targetUI?.label,
+        kind: candidate.tool.kind,
+        action: candidate.action,
+        pattern: candidate.pattern,
+        rule: candidate.rule,
+        priority: candidate.priority,
+        confidence: candidate.tool.provenance.confidence,
+        selected: !exclusionReason,
+        ...exclusionReason ? { exclusionReason } : {}
+      });
+    });
+    return {
+      tools: Object.freeze(tools),
+      graph: Object.freeze({
+        nodes: Object.freeze(nodes),
+        edges: Object.freeze(edges.map((edge) => Object.freeze(edge))),
+        selectedToolNames: Object.freeze(tools.map((tool) => tool.name))
+      })
+    };
+  }
+
   // src/discovery/index.ts
   function slug(value, fallback) {
     const result = value.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -893,7 +1040,8 @@ var AgentReadyWebMCP = (() => {
     return parts.join(" > ");
   }
   function labelOf(element) {
-    const aria = element.getAttribute("aria-label") || element.getAttribute("title");
+    const labelledBy = element.getAttribute("aria-labelledby")?.split(/\s+/).map((id) => elementByIdInTree(element, id)?.textContent?.trim()).filter((value) => !!value).join(" ");
+    const aria = labelledBy || element.getAttribute("aria-label") || element.getAttribute("title");
     if (aria) return aria;
     if (["input", "textarea", "select"].includes(element.tagName.toLowerCase())) {
       const control = element;
@@ -945,21 +1093,271 @@ var AgentReadyWebMCP = (() => {
     return "action";
   }
   var cartPattern = /(?:add|move)\s+(?:to\s+)?(?:cart|basket|bag)|(?:in den|zum)\s+(?:warenkorb|einkaufswagen)|buy now|checkout|place order/i;
+  var destructivePattern = /\b(?:delete|remove|destroy|erase|deactivate|close account|cancel subscription|löschen|entfernen)\b/i;
+  function stricterRisk(left, right) {
+    const order = ["low", "medium", "high", "critical"];
+    const level = order.indexOf(left.level) >= order.indexOf(right.level) ? left.level : right.level;
+    return left.requiresConfirmation || right.requiresConfirmation ? { level, requiresConfirmation: true } : { level };
+  }
   function riskFor(action, element, label) {
-    if (cartPattern.test(label)) return { level: "medium", requiresConfirmation: true };
-    if (action === "click" && element.tagName.toLowerCase() === "a" && element.hasAttribute("href")) {
+    let risk;
+    if (destructivePattern.test(label)) risk = { level: "high", requiresConfirmation: true };
+    else if (cartPattern.test(label)) risk = { level: "medium", requiresConfirmation: true };
+    else if (action === "click" && element.tagName.toLowerCase() === "a" && element.hasAttribute("href")) {
       const href = element.getAttribute("href")?.trim() || "";
-      if (href.startsWith("#")) return { level: "low" };
-      return { level: "medium", requiresConfirmation: true };
+      risk = href.startsWith("#") ? { level: "low" } : { level: "medium", requiresConfirmation: true };
+    } else risk = { level: action === "submit" ? "medium" : "low" };
+    if (action === "submit" && element.tagName.toLowerCase() === "form") {
+      const submitters = enabledFormSubmitters(element);
+      if (submitters.length === 1) {
+        const submitter = submitters[0];
+        risk = stricterRisk(risk, riskFor("click", submitter, labelOf(submitter)));
+      }
     }
-    return { level: action === "submit" ? "medium" : "low" };
+    return risk;
   }
   function inputSchemaFor(action, element) {
-    if ((action === "fill" || action === "submit") && element.tagName.toLowerCase() === "form") return { type: "object", properties: { fields: { type: "object" } } };
-    if (action === "select") return { type: "object", required: ["value"], properties: { value: { type: "string" } } };
+    if ((action === "fill" || action === "submit") && element.tagName.toLowerCase() === "form") {
+      const properties = /* @__PURE__ */ Object.create(null);
+      const form = element;
+      const controls = Array.from(form.elements).filter(isElementNode);
+      const nameCounts = /* @__PURE__ */ new Map();
+      for (const control of controls) {
+        const name = String(control.getAttribute("name") || "");
+        if (name) nameCounts.set(name, (nameCounts.get(name) ?? 0) + 1);
+      }
+      for (const control of controls) {
+        const name = String(control.getAttribute("name") || "");
+        if (!name || nameCounts.get(name) !== 1 || isSensitiveControl(control) || isEffectivelyDisabled(control)) continue;
+        const tag = control.tagName.toLowerCase();
+        const type = (control.getAttribute("type") || "text").toLowerCase();
+        if (tag !== "textarea" && tag !== "input") continue;
+        if (["button", "submit", "reset", "image", "checkbox", "radio"].includes(type)) continue;
+        const description = control.getAttribute("toolparamdescription") || labelOf(control);
+        properties[name] = stringSchemaFor(control, description);
+      }
+      return {
+        type: "object",
+        required: ["fields"],
+        properties: {
+          fields: {
+            type: "object",
+            properties,
+            additionalProperties: false
+          }
+        }
+      };
+    }
+    if (action === "select") {
+      const select = element.tagName.toLowerCase() === "select" ? element : void 0;
+      const options = select ? [...new Set(Array.from(select.options).filter((option) => !option.disabled && !(option.parentElement?.tagName.toLowerCase() === "optgroup" && option.parentElement.disabled) && !(select.required && !select.multiple && option.value === "")).map((option) => option.value))] : [];
+      return {
+        type: "object",
+        required: ["value"],
+        properties: {
+          value: {
+            type: "string",
+            ...options.length > 0 ? { enum: options } : {},
+            ...labelOf(element) ? { description: labelOf(element) } : {}
+          }
+        }
+      };
+    }
     if (action === "toggle") return { type: "object", required: ["checked"], properties: { checked: { type: "boolean" } } };
-    if (action === "fill") return { type: "object", required: ["value"], properties: { value: { type: "string" } } };
+    if (action === "fill") {
+      const description = element.getAttribute("toolparamdescription") || labelOf(element);
+      const property = stringSchemaFor(element, description);
+      return { type: "object", required: ["value"], properties: { value: property } };
+    }
     return { type: "object" };
+  }
+  function isValueMissingCapable(element) {
+    if (!element.hasAttribute("required") || element.hasAttribute("readonly")) return false;
+    if (element.tagName.toLowerCase() === "textarea") return true;
+    if (element.tagName.toLowerCase() !== "input") return false;
+    return [
+      "text",
+      "search",
+      "url",
+      "tel",
+      "email",
+      "date",
+      "month",
+      "week",
+      "time",
+      "datetime-local",
+      "number"
+    ].includes(normalizedInputType(element));
+  }
+  function stringSchemaFor(element, description) {
+    const schema = { type: "string" };
+    if (description) schema.description = description;
+    const type = normalizedInputType(element);
+    const constraints = {};
+    if (type === "email" && !element.hasAttribute("multiple")) constraints.format = "email";
+    const supportsPattern = element.tagName.toLowerCase() === "input" && ["text", "search", "url", "tel", "email"].includes(type);
+    const required = isValueMissingCapable(element);
+    if (required) constraints.minLength = 1;
+    const pattern = supportsPattern ? jsonSchemaPattern(element.getAttribute("pattern")) : void 0;
+    if (pattern) constraints.pattern = pattern;
+    if (required) Object.assign(schema, constraints);
+    else if (Object.keys(constraints).length > 0) schema.anyOf = [{ const: "" }, constraints];
+    return schema;
+  }
+  function normalizedInputType(element) {
+    if (element.tagName.toLowerCase() !== "input") return "";
+    const value = element.type;
+    return (value || "text").toLowerCase();
+  }
+  function isElementNode(value) {
+    return !!value && typeof value === "object" && value.nodeType === 1 && typeof value.getAttribute === "function";
+  }
+  function jsonSchemaPattern(pattern) {
+    if (pattern === null || /(?:&&|--|\\q\{)/.test(pattern)) return void 0;
+    const anchored = `^(?:${pattern})$`;
+    try {
+      new RegExp(pattern, "v");
+      new RegExp(anchored, "u");
+      return anchored;
+    } catch {
+      return void 0;
+    }
+  }
+  function elementByIdInTree(element, id) {
+    const root = element.getRootNode();
+    if (typeof root.getElementById === "function") return root.getElementById(id);
+    if (root.nodeType === 1 && root.id === id) return root;
+    try {
+      return root.querySelector(attributeSelector("id", id));
+    } catch {
+      return null;
+    }
+  }
+  function normalized(value) {
+    return value.trim().toLowerCase().replace(/\s+/g, " ");
+  }
+  function stableHash(value) {
+    let hash = 2166136261;
+    for (let index = 0; index < value.length; index += 1) {
+      hash ^= value.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(36);
+  }
+  function ownerIdentity(element) {
+    const explicitScope = element.closest("[data-webmcp-scope]");
+    const associatedForm = "form" in element ? element.form : null;
+    const owner = explicitScope || associatedForm || element.closest(
+      'form, dialog, [role="dialog"], [role="search"], main, nav, aside, section, article'
+    );
+    if (!owner) return treeIdentity(element.getRootNode());
+    return [
+      owner.tagName.toLowerCase(),
+      owner.getAttribute("data-webmcp-scope") || "",
+      owner.id || "",
+      owner.getAttribute("role") || "",
+      normalized(
+        owner.getAttribute("aria-label") || owner.getAttribute("title") || owner.getAttribute("name") || ""
+      ),
+      structuralPath(owner)
+    ].join(":");
+  }
+  function structuralPath(element) {
+    const parts = [];
+    let current = element;
+    while (current) {
+      let part = current.tagName.toLowerCase();
+      if (current.id) {
+        parts.unshift(`#${current.id}`);
+        break;
+      }
+      const siblings = current.parentElement ? Array.from(current.parentElement.children).filter((item) => item.tagName === current.tagName) : [];
+      if (siblings.length > 1) part += `:${siblings.indexOf(current) + 1}`;
+      parts.unshift(part);
+      current = current.parentElement;
+    }
+    return `${treeIdentity(element.getRootNode())}/${parts.join("/")}`;
+  }
+  function treeIdentity(root) {
+    if ("host" in root && isElementNode(root.host)) {
+      return `${structuralPath(root.host)}::shadow`;
+    }
+    if (root.nodeType === 9) {
+      const frame = root.defaultView?.frameElement;
+      return frame && isElementNode(frame) ? `${structuralPath(frame)}::frame` : "document";
+    }
+    if (root.nodeType === 1) {
+      const element = root;
+      return `detached:${element.tagName.toLowerCase()}:${element.id || ""}`;
+    }
+    return "tree";
+  }
+  function fieldSignature(element) {
+    if (element.tagName.toLowerCase() !== "form") return "";
+    return Array.from(element.elements).filter(isElementNode).map((control) => `${control.tagName.toLowerCase()}:${control.getAttribute("name") || ""}:${control.getAttribute("type") || ""}`).sort().join(",");
+  }
+  function semanticIdentity(element, action, pattern, label, selector) {
+    const declared = element.getAttribute("data-webmcp-tool");
+    const anchor = declared ? `declared:${normalized(declared)}` : element.id ? `id:${element.id}` : element.getAttribute("name") ? `name:${element.getAttribute("name")}` : `label:${normalized(label)}`;
+    const stableName = !!element.getAttribute("name") && selector.startsWith("[name=");
+    const stableAnchor = !!(declared || element.id || stableName) && !selector.includes(":nth-of-type");
+    const signature = [
+      treeIdentity(element.getRootNode()),
+      action || "query",
+      pattern,
+      ...stableAnchor ? [] : [ownerIdentity(element)],
+      anchor,
+      fieldSignature(element),
+      ...stableAnchor ? [] : [selector]
+    ].join("|");
+    const equivalence = element.getAttribute("data-webmcp-equivalent")?.trim();
+    const key = equivalence ? ["equivalent", action || "query", pattern, ownerIdentity(element), normalized(equivalence)].join("|") : `${treeIdentity(element.getRootNode())}|${signature}|target:${selector}`;
+    return { id: `ui-${stableHash(signature)}`, key };
+  }
+  function stableNameSeed(element, label, selector) {
+    const declared = element.getAttribute("data-webmcp-tool");
+    if (declared) return declared;
+    if (element.id) return element.id;
+    if (["input", "textarea", "select"].includes(element.tagName.toLowerCase())) {
+      const name = element.getAttribute("name");
+      if (name && selector.startsWith("[name=")) return name;
+      if (label && normalized(label) !== normalized(name || "")) return label;
+      const owner = "form" in element ? element.form : null;
+      const ownerName = owner?.id || owner?.getAttribute("aria-label");
+      if (name && ownerName) return `${ownerName}-${name}`;
+    }
+    return label;
+  }
+  function ruleFor(element, action, label) {
+    if (explicit(element)) return { rule: "explicit-metadata", priority: 1e3 };
+    if (element.tagName.toLowerCase() === "form") return { rule: "semantic-form", priority: 900 };
+    if (element.hasAttribute("aria-label") || element.hasAttribute("aria-labelledby") || element.hasAttribute("role")) {
+      return { rule: "aria-html", priority: 700 };
+    }
+    if (label) return { rule: "aria-html", priority: action === "submit" ? 720 : 650 };
+    return { rule: "textual-heuristic", priority: 500 };
+  }
+  function enabledFormSubmitters(form) {
+    const root = form.getRootNode();
+    return Array.from(root.querySelectorAll(
+      'button, input[type="submit"], input[type="image"]'
+    )).filter((control) => {
+      const tag = control.tagName.toLowerCase();
+      return control.form === form && !isEffectivelyDisabled(control) && (tag !== "button" || !["button", "reset"].includes(control.type));
+    });
+  }
+  function descriptionFor(element, action, label) {
+    const base = element.getAttribute("data-webmcp-description") || `${action} ${label || element.tagName.toLowerCase()}`;
+    if (action !== "submit" || element.tagName.toLowerCase() !== "form") return base;
+    const submitters = enabledFormSubmitters(element);
+    if (submitters.length !== 1) return base;
+    const submitter = submitters[0];
+    const submitterLabel = labelOf(submitter) || submitter.tagName.toLowerCase();
+    const methodOverride = submitter.getAttribute("formmethod");
+    const overrides = [
+      methodOverride ? `method ${methodOverride}` : ""
+    ].filter(Boolean).join(", ");
+    return `${base}. Submits via "${submitterLabel}"${overrides ? ` (${overrides})` : ""}.`;
   }
   function semanticPatternFor(element, action, label) {
     const role = element.getAttribute("role") || "";
@@ -996,11 +1394,44 @@ var AgentReadyWebMCP = (() => {
     visit(root);
     return result;
   }
-  function discoverUI(root, options = {}) {
+  function discoverSemanticUI(root, options = {}) {
     const names = /* @__PURE__ */ new Set();
-    const tools = [];
+    const candidateIds = /* @__PURE__ */ new Set();
+    const candidates = [];
     const coveredAccessibleOfferRegions = [];
     const coveredRepeatedActionControls = /* @__PURE__ */ new Set();
+    const addCandidate = (tool, element, action, pattern, rule, priority, isExplicit, capabilityKey) => {
+      const identity = semanticIdentity(
+        element,
+        action,
+        pattern,
+        tool.targetUI?.label || "",
+        tool.targetUI?.selector || ""
+      );
+      let id = identity.id;
+      let suffix = 2;
+      while (candidateIds.has(id)) id = `${identity.id}-${suffix++}`;
+      candidateIds.add(id);
+      candidates.push({
+        id,
+        capabilityKey: capabilityKey || identity.key,
+        element,
+        action,
+        pattern,
+        rule,
+        priority,
+        explicit: isExplicit,
+        tool: {
+          ...tool,
+          metadata: {
+            ...tool.metadata ?? {},
+            semanticId: id,
+            semanticRule: rule,
+            semanticPriority: priority
+          }
+        }
+      });
+    };
     for (const context of contexts(root, options)) {
       try {
         const { element } = context;
@@ -1027,7 +1458,15 @@ var AgentReadyWebMCP = (() => {
             const covered = accessibleOffers && coveredAccessibleOfferRegions.some((region) => region.contains(element));
             if (!covered) {
               names.add(name2);
-              tools.push(repeated);
+              addCandidate(
+                repeated,
+                element,
+                void 0,
+                String(repeated.metadata?.pattern || "repeated-list"),
+                "repeated-structure",
+                850,
+                false
+              );
               if (accessibleOffers) coveredAccessibleOfferRegions.push(element);
               const repeatedActions = createRepeatedItemActionTools({
                 root: context.root,
@@ -1044,7 +1483,16 @@ var AgentReadyWebMCP = (() => {
                 let groupedSuffix = 2;
                 while (names.has(groupedName)) groupedName = `${groupedBase}-${groupedSuffix++}`;
                 names.add(groupedName);
-                tools.push({ ...groupedTool, name: groupedName });
+                addCandidate(
+                  { ...groupedTool, name: groupedName },
+                  element,
+                  "click",
+                  String(groupedTool.metadata?.pattern || "repeated-item-action"),
+                  "repeated-structure",
+                  840,
+                  false,
+                  `${identityKeyForRepeated(name2)}|${groupedTool.name}`
+                );
               }
             }
           }
@@ -1055,7 +1503,10 @@ var AgentReadyWebMCP = (() => {
         if (!isExplicit && element.tagName.toLowerCase() === "button" && element.getAttribute("type") === "button" && !labelOf(element)) continue;
         const label = labelOf(element);
         const declared = element.getAttribute("data-webmcp-tool");
-        const base = declared ? slug(declared, "tool") : `${action}.${slug(label, element.tagName.toLowerCase() === "form" && isSearch(element) ? "search" : element.tagName.toLowerCase())}`;
+        const base = declared ? slug(declared, "tool") : `${action}.${slug(
+          stableNameSeed(element, label, context.selector),
+          element.tagName.toLowerCase() === "form" && isSearch(element) ? "search" : element.tagName.toLowerCase()
+        )}`;
         let name = base;
         let suffix = 2;
         while (names.has(name)) name = `${base}-${suffix++}`;
@@ -1063,12 +1514,15 @@ var AgentReadyWebMCP = (() => {
         const targetUI = { selector: context.selector, label: label || void 0, role: element.getAttribute("role") || void 0 };
         const provenance = isExplicit ? { source: "metadata", confidence: 1, sourceId: declared || element.getAttribute("data-webmcp-action") || void 0 } : { source: "discovery", confidence: element.tagName.toLowerCase() === "form" && isSearch(element) ? 0.95 : 0.9 };
         const semanticPattern = semanticPatternFor(element, action, label);
-        tools.push({
+        const precedence = ruleFor(element, action, label);
+        addCandidate({
           name,
-          description: element.getAttribute("data-webmcp-description") || `${action} ${label || element.tagName.toLowerCase()}`,
+          title: label || void 0,
+          description: descriptionFor(element, action, label),
           kind: kindFor(action, element),
           inputSchema: inputSchemaFor(action, element),
           outputSchema: { type: "object", properties: { status: { type: "string" } } },
+          ...kindFor(action, element) === "navigation" ? {} : { annotations: { readOnlyHint: false } },
           risk: riskFor(action, element, label),
           provenance,
           targetUI,
@@ -1076,11 +1530,20 @@ var AgentReadyWebMCP = (() => {
           lifecycle: "active",
           status: "available",
           handler: (input) => executeDomAction(context.root, context.selector, action, input)
-        });
+        }, element, action, semanticPattern, precedence.rule, precedence.priority, isExplicit);
       } catch {
       }
     }
-    return Object.freeze(tools);
+    return compileSemanticCandidates(candidates, options.catalog);
+  }
+  function identityKeyForRepeated(name) {
+    return `repeated:${name}`;
+  }
+  function analyzeUI(root, options = {}) {
+    return discoverSemanticUI(root, options).graph;
+  }
+  function discoverUI(root, options = {}) {
+    return discoverSemanticUI(root, options).tools;
   }
 
   // src/policy/index.ts
@@ -1614,6 +2077,7 @@ var AgentReadyWebMCP = (() => {
     let syncRevision = 0;
     let lastInvalidation = Date.now();
     let invalidationCleanups = [];
+    let semanticGraph;
     const addDiagnostic = (diagnostic) => {
       diagnostics.push(diagnostic);
     };
@@ -1721,7 +2185,9 @@ var AgentReadyWebMCP = (() => {
       if (destroyed || mode !== "auto" && mode !== "hybrid" || !root) return;
       let tools;
       try {
-        tools = discoverUI(root, discoveryOptions);
+        const compilation = discoverSemanticUI(root, discoveryOptions);
+        tools = compilation.tools;
+        semanticGraph = compilation.graph;
       } catch {
         addDiagnostic({ code: "discovery-failed", message: "UI discovery failed." });
         return;
@@ -1804,7 +2270,9 @@ var AgentReadyWebMCP = (() => {
       if (destroyed || mode !== "auto" && mode !== "hybrid" || !root) return Object.freeze([]);
       let tools;
       try {
-        tools = discoverUI(root, discoveryOptions);
+        const compilation = discoverSemanticUI(root, discoveryOptions);
+        tools = compilation.tools;
+        semanticGraph = compilation.graph;
       } catch {
         addDiagnostic({ code: "discovery-failed", message: "UI discovery failed." });
         return Object.freeze([]);
@@ -1913,6 +2381,7 @@ var AgentReadyWebMCP = (() => {
         throw new RuntimeDestroyedError();
       },
       listTools: () => Object.freeze(registry.list().map(descriptorOf)),
+      getSemanticGraph: () => semanticGraph,
       invokeTool(name, input) {
         if (destroyed) throw new RuntimeDestroyedError();
         const tool = registry.get(name);

@@ -32,7 +32,7 @@ export {
   RuntimeDestroyedError,
 } from './core/registry.js';
 export type { RegistryChangeEvent, RegistryChangeType, RegistryListener } from './core/registry.js';
-export { discoverUI } from './discovery/index.js';
+export { analyzeUI, discoverUI } from './discovery/index.js';
 export { createEventInvalidationSource, DomObserver, RuntimeObserver } from './observers/index.js';
 export type {
   DisposableObserver,
@@ -41,7 +41,17 @@ export type {
   RuntimeObserverOptions,
 } from './observers/index.js';
 export { executeDomAction, resolveDomTarget } from './dom/actions.js';
-export type { DiscoveryOptions, RepeatedListOptions } from './discovery/index.js';
+export type {
+  DiscoveryOptions,
+  RepeatedListOptions,
+  SemanticCatalogOptions,
+  SemanticEdgeRelation,
+  SemanticExclusionReason,
+  SemanticRule,
+  SemanticUIEdge,
+  SemanticUIGraph,
+  SemanticUINode,
+} from './discovery/index.js';
 export type { DomAction, DomActionOptions, DomActionResult } from './dom/actions.js';
 export {
   evaluateRuntimeTool,

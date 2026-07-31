@@ -85,6 +85,24 @@ function fillForm(form: HTMLFormElement, input: JsonObject, options: DomActionOp
   return { fields: count, skipped };
 }
 
+function enabledSubmitters(form: HTMLFormElement): (HTMLButtonElement | HTMLInputElement)[] {
+  const formControls = Array.from(form.elements)
+    .filter((control): control is HTMLButtonElement | HTMLInputElement => {
+      if (!('tagName' in control) || (control as Element).nodeType !== 1) return false;
+      const element = control as HTMLButtonElement | HTMLInputElement;
+      const tag = element.tagName.toLowerCase();
+      return element.form === form
+        && ((tag === 'button' && !['button', 'reset'].includes(element.type))
+          || (tag === 'input' && ['submit', 'image'].includes(element.type)));
+    });
+  const root = form.getRootNode() as ParentNode;
+  const imageControls = Array.from(
+    root.querySelectorAll<HTMLInputElement>('input[type="image"]'),
+  ).filter((control) => control.form === form);
+  return [...new Set([...formControls, ...imageControls])]
+    .filter((control) => !isDisabledTarget(control));
+}
+
 /** Execute an action against an already-resolved element. */
 export function executeElementAction(
   target: Element,
@@ -184,7 +202,11 @@ export function executeElementAction(
         const form = (isTag(target, 'form') ? target : target.closest('form')) as HTMLFormElement | null;
         if (!form) return { status: 'error', action, selector, error: 'form-not-found' };
         const filled = fillForm(form, input, options);
-        if (typeof form.requestSubmit === 'function') form.requestSubmit();
+        if (typeof form.requestSubmit === 'function') {
+          const submitters = enabledSubmitters(form);
+          if (submitters.length === 1) submitters[0]!.click();
+          else form.requestSubmit();
+        }
         else form.dispatchEvent(new SubmitEvent('submit', { bubbles: true, cancelable: true }));
         return { status: 'ok', action, selector, result: { ...filled, submitted: true } };
       }
