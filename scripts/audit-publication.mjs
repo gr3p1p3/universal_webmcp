@@ -2,7 +2,8 @@
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { extname } from 'node:path';
+import { tmpdir } from 'node:os';
+import { extname, join } from 'node:path';
 import process from 'node:process';
 
 const forbiddenPaths = [
@@ -58,6 +59,94 @@ const output = execFileSync(
 const files = output.split('\0').filter(Boolean);
 const findings = [];
 
+const expectedLicense = 'AGPL-3.0-only';
+const packageManifest = JSON.parse(readFileSync('package.json', 'utf8'));
+const lockManifest = JSON.parse(readFileSync('package-lock.json', 'utf8'));
+const lockRoot = lockManifest.packages?.[''];
+
+if (packageManifest.license !== expectedLicense) {
+  findings.push(`package.json: expected license ${expectedLicense}`);
+}
+if (lockRoot?.license !== packageManifest.license) {
+  findings.push('package-lock.json: root license does not match package.json');
+}
+if (lockManifest.version !== packageManifest.version || lockRoot?.version !== packageManifest.version) {
+  findings.push('package-lock.json: root version does not match package.json');
+}
+
+const packageFiles = new Set(packageManifest.files ?? []);
+const expectedPackageFiles = ['dist/*.js', 'dist/*.d.ts', 'NOTICE'];
+for (const requiredFile of expectedPackageFiles) {
+  if (!packageFiles.has(requiredFile)) {
+    findings.push(`package.json: files must include ${requiredFile}`);
+  }
+}
+for (const packageFile of packageFiles) {
+  if (!expectedPackageFiles.includes(packageFile)) {
+    findings.push(`package.json: unexpected publication path ${packageFile}`);
+  }
+}
+
+const licenseText = readFileSync('LICENSE', 'utf8');
+if (!licenseText.includes('GNU AFFERO GENERAL PUBLIC LICENSE')
+  || !licenseText.includes('Version 3, 19 November 2007')
+  || !licenseText.includes('END OF TERMS AND CONDITIONS')) {
+  findings.push('LICENSE: canonical AGPLv3 markers are missing');
+}
+
+const noticeText = readFileSync('NOTICE', 'utf8');
+if (!noticeText.includes(`SPDX: ${expectedLicense}`)) {
+  findings.push(`NOTICE: expected SPDX identifier ${expectedLicense}`);
+}
+const expectedSourceUrl = `https://github.com/gr3p1p3/universal_webmcp/tree/v${packageManifest.version}`;
+if (!noticeText.includes(expectedSourceUrl)) {
+  findings.push(`NOTICE: expected versioned source URL ${expectedSourceUrl}`);
+}
+
+const readmeText = readFileSync('README.md', 'utf8');
+if (!readmeText.includes(expectedSourceUrl)) {
+  findings.push(`README.md: expected versioned source URL ${expectedSourceUrl}`);
+}
+
+const packOutput = execFileSync(
+  'npm',
+  ['pack', '--dry-run', '--json', '--ignore-scripts'],
+  {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      npm_config_cache: join(tmpdir(), 'universal-webmcp-npm-cache'),
+    },
+  },
+);
+const [packResult] = JSON.parse(packOutput);
+const requiredPackedFiles = [
+  'LICENSE',
+  'NOTICE',
+  'README.md',
+  'dist/browser.d.ts',
+  'dist/browser.iife.js',
+  'dist/browser.js',
+  'dist/index.d.ts',
+  'dist/index.js',
+  'package.json',
+];
+const packedFiles = new Set(packResult?.files?.map(({ path }) => path) ?? []);
+for (const requiredFile of requiredPackedFiles) {
+  if (!packedFiles.has(requiredFile)) {
+    findings.push(`npm pack: missing required file ${requiredFile}`);
+  }
+}
+for (const packedFile of packedFiles) {
+  const isExpected = requiredPackedFiles.includes(packedFile)
+    || /^dist\/chunk-[A-Za-z0-9_-]+\.js$/.test(packedFile);
+  if (!isExpected) findings.push(`npm pack: unexpected file ${packedFile}`);
+  if (packedFile.endsWith('.js')
+    && !readFileSync(packedFile, 'utf8').includes(`SPDX-License-Identifier: ${expectedLicense}`)) {
+    findings.push(`npm pack: missing ${expectedLicense} banner in ${packedFile}`);
+  }
+}
+
 for (const file of files) {
   if (!existsSync(file)) continue;
 
@@ -91,4 +180,6 @@ if (findings.length > 0) {
   process.exit(1);
 }
 
-console.log(`Publication audit passed (${files.length} candidate files checked).`);
+console.log(
+  `Publication audit passed (${files.length} candidates; ${packedFiles.size} package files; ${packResult.size} bytes).`,
+);

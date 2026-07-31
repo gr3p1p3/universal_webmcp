@@ -1,6 +1,17 @@
 import { defineConfig } from 'tsup';
 
-const shared = { clean: true, sourcemap: true, target: 'es2022' as const };
+const licenseBanner = `/*!
+ * Universal WebMCP
+ * Copyright (C) 2026 AgentReady
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */`;
+
+const shared = {
+  banner: { js: licenseBanner },
+  clean: true,
+  sourcemap: true,
+  target: 'es2022' as const,
+};
 
 export default defineConfig([
   {

@@ -1,9 +1,9 @@
 {
   "name": "@gr3p/universal-webmcp",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "A local, progressive-enhancement runtime for exposing existing web UIs to WebMCP-capable agents.",
   "type": "module",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/gr3p1p3/universal_webmcp.git"
@@ -24,7 +24,8 @@
   },
   "files": [
     "dist/*.js",
-    "dist/*.d.ts"
+    "dist/*.d.ts",
+    "NOTICE"
   ],
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -56,9 +57,9 @@
     "test:e2e:install": "playwright install --with-deps",
     "benchmark:tokens": "npm run build && node scripts/benchmark-tokens.mjs --output .benchmark/token-results-controlled.json --chart .benchmark/token-savings-controlled.svg",
     "benchmark:tokens:live": "npm run build && node scripts/benchmark-tokens.mjs --live --output .benchmark/token-results-live.json --chart .benchmark/token-savings-live.svg",
-    "audit:public": "node scripts/audit-publication.mjs && npm pack --dry-run",
+    "audit:public": "npm run build && node scripts/audit-publication.mjs",
     "prepack": "npm run build",
-    "prepublishOnly": "npm run check",
+    "prepublishOnly": "npm run check && npm run audit:public",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm run lint && npm test"

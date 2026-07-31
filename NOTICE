@@ -1,0 +1,15 @@
+Universal WebMCP
+Copyright (C) 2026 AgentReady
+
+This program is licensed under the GNU Affero General Public License,
+version 3 only (SPDX: AGPL-3.0-only). See LICENSE for the complete terms.
+
+The Corresponding Source for this package version is available at:
+https://github.com/gr3p1p3/universal_webmcp/tree/v0.3.0
+
+The npm package intentionally contains only the runtime build, type declarations,
+and licensing notices. The versioned source above contains the preferred source
+form and the scripts needed to build it.
+
+Releases up to and including version 0.2.1 were published under the MIT
+License. Those releases remain available under their original terms.

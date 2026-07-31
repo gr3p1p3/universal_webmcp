@@ -1,3 +1,8 @@
+/*!
+ * Universal WebMCP
+ * Copyright (C) 2026 AgentReady
+ * SPDX-License-Identifier: AGPL-3.0-only
+ */
 "use strict";
 var AgentReadyWebMCP = (() => {
   var __defProp = Object.defineProperty;
