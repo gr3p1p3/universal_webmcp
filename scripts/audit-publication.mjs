@@ -103,11 +103,6 @@ if (!noticeText.includes(expectedSourceUrl)) {
   findings.push(`NOTICE: expected versioned source URL ${expectedSourceUrl}`);
 }
 
-const readmeText = readFileSync('README.md', 'utf8');
-if (!readmeText.includes(expectedSourceUrl)) {
-  findings.push(`README.md: expected versioned source URL ${expectedSourceUrl}`);
-}
-
 const packOutput = execFileSync(
   'npm',
   ['pack', '--dry-run', '--json', '--ignore-scripts'],

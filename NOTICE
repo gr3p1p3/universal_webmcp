@@ -5,7 +5,7 @@ This program is licensed under the GNU Affero General Public License,
 version 3 only (SPDX: AGPL-3.0-only). See LICENSE for the complete terms.
 
 The Corresponding Source for this package version is available at:
-https://github.com/gr3p1p3/universal_webmcp/tree/v0.3.0
+https://github.com/gr3p1p3/universal_webmcp/tree/v0.3.1
 
 The npm package intentionally contains only the runtime build, type declarations,
 and licensing notices. The versioned source above contains the preferred source

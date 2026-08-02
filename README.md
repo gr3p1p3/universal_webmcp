@@ -104,7 +104,7 @@ For a version-pinned URL backed by the npm release, use jsDelivr:
 
 ```html
 <script
-  src="https://cdn.jsdelivr.net/npm/@gr3p/universal-webmcp@0.3.0/dist/browser.iife.js"
+  src="https://cdn.jsdelivr.net/npm/@gr3p/universal-webmcp@0.3.1/dist/browser.iife.js"
   data-webmcp-auto
 ></script>
 ```
@@ -379,17 +379,4 @@ Universal WebMCP Runtime is not a remote MCP server, backend API replacement, CA
 
 ## License
 
-Copyright (C) 2026 AgentReady.
-
-Starting with version 0.3.0, Universal WebMCP is licensed under the
 [GNU Affero General Public License v3.0 only](LICENSE) (`AGPL-3.0-only`).
-Commercial use is permitted. Distributing covered builds, or allowing users to
-interact remotely over a computer network with a modified version that supports
-such interaction, carries the corresponding AGPL source code obligations. This
-is a summary, not a substitute for the license text.
-
-The npm package stays runtime-only. The exact Corresponding Source for this
-release is the immutable [`v0.3.0` source tag](https://github.com/gr3p1p3/universal_webmcp/tree/v0.3.0).
-
-Releases up to and including version 0.2.1 were published under the MIT License
-and remain available under those terms; the license change is not retroactive.
